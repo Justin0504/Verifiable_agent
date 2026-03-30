@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import random
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
@@ -89,12 +90,82 @@ class BaseBaseline(ABC):
                 1 for p, g in zip(all_claim_preds, all_claim_golds) if p == g
             ) / len(all_claim_preds)
 
+        # Bootstrap 95% confidence intervals
+        acc_ci = BaseBaseline._bootstrap_ci(
+            [1 if r.predicted_label == r.gold_label else 0 for r in results]
+        )
+        f1_ci = BaseBaseline._bootstrap_ci_f1(results)
+
         return {
             "accuracy": correct / total,
+            "accuracy_ci_95": acc_ci,
             "macro_f1": macro_f1,
+            "macro_f1_ci_95": f1_ci,
             "per_label": per_label,
             "confusion_matrix": confusion,
             "total": total,
             "claim_accuracy": claim_accuracy,
             "total_claims": len(all_claim_preds),
         }
+
+    @staticmethod
+    def _bootstrap_ci(
+        binary_results: list[int],
+        n_bootstrap: int = 1000,
+        confidence: float = 0.95,
+        seed: int = 42,
+    ) -> tuple[float, float]:
+        """Compute bootstrap confidence interval for accuracy."""
+        if len(binary_results) < 5:
+            mean = sum(binary_results) / len(binary_results) if binary_results else 0
+            return (mean, mean)
+
+        rng = random.Random(seed)
+        n = len(binary_results)
+        means = []
+        for _ in range(n_bootstrap):
+            sample = [rng.choice(binary_results) for _ in range(n)]
+            means.append(sum(sample) / n)
+
+        means.sort()
+        alpha = (1 - confidence) / 2
+        lo = means[int(alpha * n_bootstrap)]
+        hi = means[int((1 - alpha) * n_bootstrap)]
+        return (round(lo, 4), round(hi, 4))
+
+    @staticmethod
+    def _bootstrap_ci_f1(
+        results: list["BaselineResult"],
+        n_bootstrap: int = 1000,
+        seed: int = 42,
+    ) -> tuple[float, float]:
+        """Compute bootstrap CI for macro F1."""
+        if len(results) < 5:
+            return (0.0, 0.0)
+
+        rng = random.Random(seed)
+        n = len(results)
+        labels = ["S", "C", "N"]
+        f1_scores = []
+
+        for _ in range(n_bootstrap):
+            sample = [rng.choice(results) for _ in range(n)]
+            per_label_f1 = []
+            for label in labels:
+                tp = sum(1 for r in sample if r.predicted_label == label and r.gold_label == label)
+                fp = sum(1 for r in sample if r.predicted_label == label and r.gold_label != label)
+                fn = sum(1 for r in sample if r.predicted_label != label and r.gold_label == label)
+                support = tp + fn
+                if support == 0:
+                    continue
+                p = tp / (tp + fp) if (tp + fp) > 0 else 0
+                r = tp / (tp + fn) if (tp + fn) > 0 else 0
+                f1 = 2 * p * r / (p + r) if (p + r) > 0 else 0
+                per_label_f1.append(f1)
+            macro = sum(per_label_f1) / len(per_label_f1) if per_label_f1 else 0
+            f1_scores.append(macro)
+
+        f1_scores.sort()
+        lo = f1_scores[int(0.025 * n_bootstrap)]
+        hi = f1_scores[int(0.975 * n_bootstrap)]
+        return (round(lo, 4), round(hi, 4))

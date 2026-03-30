@@ -10,6 +10,7 @@ Implements 5 baselines:
 
 from .base import BaseBaseline, BaselineResult
 from .cove import CoVeBaseline
+from .direct_prompting import DirectPromptingBaseline
 from .factscore_baseline import FActScoreBaseline
 from .retrieve_nli import RetrieveNLIBaseline
 from .safe_baseline import SAFEBaseline
@@ -18,6 +19,7 @@ from .selfcheck import SelfCheckGPTBaseline
 __all__ = [
     "BaseBaseline",
     "BaselineResult",
+    "DirectPromptingBaseline",
     "SelfCheckGPTBaseline",
     "FActScoreBaseline",
     "SAFEBaseline",

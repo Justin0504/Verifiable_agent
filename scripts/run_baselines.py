@@ -41,6 +41,7 @@ from src.baselines import (
     BaseBaseline,
     BaselineResult,
     CoVeBaseline,
+    DirectPromptingBaseline,
     FActScoreBaseline,
     RetrieveNLIBaseline,
     SAFEBaseline,
@@ -66,6 +67,7 @@ BENCHMARK_LOADERS = {
 }
 
 BASELINE_REGISTRY = {
+    "direct_prompting": DirectPromptingBaseline,
     "selfcheck_gpt": SelfCheckGPTBaseline,
     "factscore": FActScoreBaseline,
     "safe": SAFEBaseline,
@@ -147,7 +149,9 @@ class _MockResponse:
 
 def create_baseline(name: str, llm, kb=None) -> BaseBaseline:
     """Create a baseline instance."""
-    if name == "selfcheck_gpt":
+    if name == "direct_prompting":
+        return DirectPromptingBaseline(llm=llm)
+    elif name == "selfcheck_gpt":
         return SelfCheckGPTBaseline(llm=llm, n_samples=3)
     elif name == "factscore":
         return FActScoreBaseline(llm=llm, knowledge_base=kb)
@@ -213,14 +217,18 @@ def format_results_table(all_results: dict[str, dict[str, dict]]) -> str:
     lines.append(header)
     lines.append("-" * len(header))
 
-    # Accuracy rows
-    lines.append("\nAccuracy:")
+    # Accuracy rows with CI
+    lines.append("\nAccuracy (95% CI):")
     for bench in benchmarks:
         row = f"  {bench:<13}"
         for baseline in baselines:
             metrics = all_results[bench].get(baseline, {})
             acc = metrics.get("accuracy", 0.0)
-            row += f" | {acc:>13.1%}"
+            ci = metrics.get("accuracy_ci_95", (0, 0))
+            if isinstance(ci, (list, tuple)) and len(ci) == 2 and ci[0] != ci[1]:
+                row += f" | {acc:>5.1%}({ci[0]:.0%}-{ci[1]:.0%})"
+            else:
+                row += f" | {acc:>13.1%}"
         lines.append(row)
 
     # Macro F1 rows
@@ -277,6 +285,8 @@ def main() -> None:
                         help="Dataset split")
     parser.add_argument("--output", default=None,
                         help="Output directory for results")
+    parser.add_argument("--no-kb", action="store_true",
+                        help="Do not use knowledge base (rely only on sample evidence)")
     parser.add_argument("--include-ours", action="store_true",
                         help="Include our Verifier pipeline for comparison")
     args = parser.parse_args()
@@ -303,16 +313,19 @@ def main() -> None:
 
     # Optional knowledge base
     kb = None
-    kb_path = Path("knowledge_base/documents")
-    if kb_path.exists():
-        try:
-            from src.verifier.knowledge_base import KnowledgeBase
-            kb = KnowledgeBase(str(kb_path))
-            kb.load()
-            n_docs = len(kb.documents) if hasattr(kb, 'documents') else '?'
-            print(f"Loaded knowledge base: {n_docs} documents\n")
-        except Exception as e:
-            print(f"Knowledge base load failed: {e}\n")
+    if not args.no_kb:
+        kb_path = Path("knowledge_base/documents")
+        if kb_path.exists():
+            try:
+                from src.verifier.knowledge_base import KnowledgeBase
+                kb = KnowledgeBase(str(kb_path))
+                kb.load()
+                n_docs = len(kb.documents) if hasattr(kb, 'documents') else '?'
+                print(f"Loaded knowledge base: {n_docs} documents\n")
+            except Exception as e:
+                print(f"Knowledge base load failed: {e}\n")
+    else:
+        print("Knowledge base disabled (--no-kb). Using sample evidence only.\n")
 
     # Output directory
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
