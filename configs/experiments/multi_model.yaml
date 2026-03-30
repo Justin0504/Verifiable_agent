@@ -1,0 +1,59 @@
+# Multi-model comparison experiment
+experiment:
+  name: "multi_model_comparison"
+  seed: 42
+  num_epochs: 3
+  num_probes_per_type: 25
+  output_dir: "results/multi_model"
+
+proposer_llm:
+  provider: "openai"
+  model: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 1024
+
+verifier_llm:
+  provider: "openai"
+  model: "gpt-4o"
+  temperature: 0.2
+  max_tokens: 2048
+
+responder_models:
+  - provider: "openai"
+    model: "gpt-4o"
+  - provider: "openai"
+    model: "gpt-4o-mini"
+  - provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+  - provider: "vllm"
+    model: "meta-llama/Meta-Llama-3-70B-Instruct"
+    api_base: "http://localhost:8000/v1"
+  - provider: "vllm"
+    model: "mistralai/Mistral-7B-Instruct-v0.3"
+    api_base: "http://localhost:8000/v1"
+
+knowledge_base:
+  path: "knowledge_base/documents"
+  retrieval_method: "tfidf"
+  top_k: 5
+
+scoring:
+  supported_weight: 1.0
+  contradicted_weight: -2.0
+  not_mentioned_weight: -0.5
+  reliability_threshold: 0.5
+
+tools:
+  enabled: true
+  calculator: true
+  code_executor: true
+  wikidata: true
+  wikipedia: true
+  semantic_scholar: true
+  web_search: true
+
+risk_weights:
+  missing_evidence: 0.25
+  multi_hop: 0.25
+  pressure_presupposition: 0.25
+  unanswerable: 0.25

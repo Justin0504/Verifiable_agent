@@ -1,0 +1,61 @@
+# Verifiable Agent — Default Experiment Configuration
+
+experiment:
+  name: "default"
+  seed: 42
+  num_epochs: 3          # Number of self-evolution epochs
+  num_probes_per_type: 10 # Probes generated per risk type per epoch
+  output_dir: "results"
+
+# LLM provider for Proposer & Verifier
+proposer_llm:
+  provider: "openai"      # openai | anthropic | vllm
+  model: "gpt-4o"
+  temperature: 0.7
+  max_tokens: 1024
+
+verifier_llm:
+  provider: "openai"
+  model: "gpt-4o"
+  temperature: 0.2        # Low temperature for deterministic verification
+  max_tokens: 2048
+
+# Responder models to evaluate
+responder_models:
+  - provider: "openai"
+    model: "gpt-4o"
+  - provider: "anthropic"
+    model: "claude-sonnet-4-20250514"
+  - provider: "openai"
+    model: "gpt-4o-mini"
+
+# Knowledge base configuration
+knowledge_base:
+  path: "knowledge_base/documents"
+  retrieval_method: "tfidf"  # tfidf | embedding
+  top_k: 5
+
+# Scoring weights
+scoring:
+  supported_weight: 1.0
+  contradicted_weight: -2.0
+  not_mentioned_weight: -0.5
+  # Response-level threshold: score >= threshold → reliable
+  reliability_threshold: 0.5
+
+# External verification tools
+tools:
+  enabled: true
+  calculator: true         # Deterministic numerical verification
+  code_executor: true      # Deterministic code execution for complex math
+  wikidata: true           # Structured knowledge graph queries
+  wikipedia: true          # Wikipedia article summaries
+  semantic_scholar: true   # Academic paper search and citation verification
+  web_search: true         # Web search for additional evidence
+
+# Risk type distribution weights for probe generation
+risk_weights:
+  missing_evidence: 0.25
+  multi_hop: 0.25
+  pressure_presupposition: 0.25
+  unanswerable: 0.25
