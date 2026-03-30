@@ -21,11 +21,21 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Load .env file if present
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().strip().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 from src.baselines import (
     BaseBaseline,
@@ -299,7 +309,8 @@ def main() -> None:
             from src.verifier.knowledge_base import KnowledgeBase
             kb = KnowledgeBase(str(kb_path))
             kb.load()
-            print(f"Loaded knowledge base: {kb.size()} documents\n")
+            n_docs = len(kb.documents) if hasattr(kb, 'documents') else '?'
+            print(f"Loaded knowledge base: {n_docs} documents\n")
         except Exception as e:
             print(f"Knowledge base load failed: {e}\n")
 

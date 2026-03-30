@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import uuid
 from datetime import datetime
@@ -18,6 +19,15 @@ from pathlib import Path
 import yaml
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# Load .env file if present
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    for line in _env_path.read_text().strip().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 from src.data.schema import ExperimentRecord
 from src.evolution.evolver import Evolver

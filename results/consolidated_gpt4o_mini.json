@@ -1,0 +1,1073 @@
+{
+  "model": "gpt-4o-mini",
+  "metrics": {
+    "fever": {
+      "factscore": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 15
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 15
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 0.0,
+        "total_claims": 15
+      },
+      "safe": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 15
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 15,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 1.0,
+        "total_claims": 15
+      },
+      "retrieve_nli": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 15
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 15
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 0.0,
+        "total_claims": 15
+      },
+      "cove": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 1.0,
+        "total_claims": 10
+      },
+      "selfcheck_gpt": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 1.0,
+        "total_claims": 10
+      }
+    },
+    "truthfulqa": {
+      "factscore": {
+        "accuracy": 0.9333333333333333,
+        "macro_f1": 0.9481566820276498,
+        "per_label": {
+          "S": {
+            "precision": 0.9375,
+            "recall": 1.0,
+            "f1": 0.967741935483871,
+            "support": 15
+          },
+          "C": {
+            "precision": 1.0,
+            "recall": 0.8666666666666667,
+            "f1": 0.9285714285714286,
+            "support": 15
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 15,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 1,
+            "C": 13,
+            "N": 1
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 30,
+        "claim_accuracy": 0.7959183673469388,
+        "total_claims": 49
+      },
+      "safe": {
+        "accuracy": 0.4666666666666667,
+        "macro_f1": 0.45701357466063347,
+        "per_label": {
+          "S": {
+            "precision": 0.47368421052631576,
+            "recall": 0.6,
+            "f1": 0.5294117647058824,
+            "support": 15
+          },
+          "C": {
+            "precision": 0.45454545454545453,
+            "recall": 0.3333333333333333,
+            "f1": 0.3846153846153846,
+            "support": 15
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 6,
+            "N": 0
+          },
+          "C": {
+            "S": 10,
+            "C": 5,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 30,
+        "claim_accuracy": 0.4666666666666667,
+        "total_claims": 30
+      },
+      "retrieve_nli": {
+        "accuracy": 0.23333333333333334,
+        "macro_f1": 0.30526315789473685,
+        "per_label": {
+          "S": {
+            "precision": 0.5,
+            "recall": 0.13333333333333333,
+            "f1": 0.2105263157894737,
+            "support": 15
+          },
+          "C": {
+            "precision": 0.5,
+            "recall": 0.3333333333333333,
+            "f1": 0.4,
+            "support": 15
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 2,
+            "C": 5,
+            "N": 8
+          },
+          "C": {
+            "S": 2,
+            "C": 5,
+            "N": 8
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 30,
+        "claim_accuracy": 0.23333333333333334,
+        "total_claims": 30
+      },
+      "cove": {
+        "accuracy": 0.4,
+        "macro_f1": 0.4145658263305322,
+        "per_label": {
+          "S": {
+            "precision": 0.45454545454545453,
+            "recall": 0.5,
+            "f1": 0.47619047619047616,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.42857142857142855,
+            "recall": 0.3,
+            "f1": 0.3529411764705882,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 4,
+            "N": 1
+          },
+          "C": {
+            "S": 6,
+            "C": 3,
+            "N": 1
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.4,
+        "total_claims": 20
+      },
+      "selfcheck_gpt": {
+        "accuracy": 0.5,
+        "macro_f1": 0.40476190476190477,
+        "per_label": {
+          "S": {
+            "precision": 0.5,
+            "recall": 0.9,
+            "f1": 0.6428571428571429,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.5,
+            "recall": 0.1,
+            "f1": 0.16666666666666669,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 1,
+            "N": 0
+          },
+          "C": {
+            "S": 9,
+            "C": 1,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.5,
+        "total_claims": 20
+      }
+    },
+    "scifact": {
+      "factscore": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 9
+          },
+          "C": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 5
+          },
+          "N": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 5,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 1
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 1.0,
+        "total_claims": 15
+      },
+      "safe": {
+        "accuracy": 0.9333333333333333,
+        "macro_f1": 0.6363636363636364,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 9
+          },
+          "C": {
+            "precision": 0.8333333333333334,
+            "recall": 1.0,
+            "f1": 0.9090909090909091,
+            "support": 5
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 5,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 1,
+            "N": 0
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 0.9333333333333333,
+        "total_claims": 15
+      },
+      "retrieve_nli": {
+        "accuracy": 0.9333333333333333,
+        "macro_f1": 0.6363636363636364,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 9
+          },
+          "C": {
+            "precision": 0.8333333333333334,
+            "recall": 1.0,
+            "f1": 0.9090909090909091,
+            "support": 5
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 5,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 1,
+            "N": 0
+          }
+        },
+        "total": 15,
+        "claim_accuracy": 0.9333333333333333,
+        "total_claims": 15
+      },
+      "cove": {
+        "accuracy": 0.6,
+        "macro_f1": 0.44444444444444436,
+        "per_label": {
+          "S": {
+            "precision": 0.75,
+            "recall": 0.6,
+            "f1": 0.6666666666666665,
+            "support": 5
+          },
+          "C": {
+            "precision": 0.6,
+            "recall": 0.75,
+            "f1": 0.6666666666666665,
+            "support": 4
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 3,
+            "C": 2,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 3,
+            "N": 1
+          },
+          "N": {
+            "S": 1,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.6,
+        "total_claims": 10
+      },
+      "selfcheck_gpt": {
+        "accuracy": 0.9,
+        "macro_f1": 0.6363636363636364,
+        "per_label": {
+          "S": {
+            "precision": 0.8333333333333334,
+            "recall": 1.0,
+            "f1": 0.9090909090909091,
+            "support": 5
+          },
+          "C": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 4
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 4,
+            "N": 0
+          },
+          "N": {
+            "S": 1,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.9,
+        "total_claims": 10
+      }
+    },
+    "halueval": {
+      "factscore": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 10,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.8536585365853658,
+        "total_claims": 41
+      },
+      "safe": {
+        "accuracy": 0.5,
+        "macro_f1": 0.3333333333333333,
+        "per_label": {
+          "S": {
+            "precision": 0.5,
+            "recall": 1.0,
+            "f1": 0.6666666666666666,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.5,
+        "total_claims": 20
+      },
+      "retrieve_nli": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 10
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 10
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.0,
+        "total_claims": 20
+      }
+    },
+    "musique": {
+      "factscore": {
+        "accuracy": 0.8,
+        "macro_f1": 0.875,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 5
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 1.0,
+            "recall": 0.6,
+            "f1": 0.7499999999999999,
+            "support": 5
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 2,
+            "N": 3
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.9,
+        "total_claims": 20
+      },
+      "safe": {
+        "accuracy": 0.6,
+        "macro_f1": 0.6666666666666667,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 5
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 1.0,
+            "recall": 0.2,
+            "f1": 0.33333333333333337,
+            "support": 5
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 4,
+            "N": 1
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.8,
+        "total_claims": 20
+      },
+      "retrieve_nli": {
+        "accuracy": 0.1,
+        "macro_f1": 0.0909090909090909,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 5
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.16666666666666666,
+            "recall": 0.2,
+            "f1": 0.1818181818181818,
+            "support": 5
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 5
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 4,
+            "N": 1
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.25,
+        "total_claims": 20
+      }
+    },
+    "factscore": {
+      "factscore": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.0,
+        "total_claims": 40
+      },
+      "safe": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.375,
+        "total_claims": 40
+      },
+      "retrieve_nli": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.0,
+        "total_claims": 40
+      }
+    }
+  }
+}

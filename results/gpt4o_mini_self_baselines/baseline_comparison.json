@@ -1,0 +1,789 @@
+{
+  "timestamp": "2026-03-30T14:26:58.270311",
+  "config": {
+    "baselines": [
+      "cove",
+      "selfcheck_gpt"
+    ],
+    "benchmarks": [
+      "fever",
+      "truthfulqa",
+      "scifact"
+    ],
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "manual": true
+  },
+  "metrics": {
+    "fever": {
+      "cove": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 1.0,
+        "total_claims": 10
+      },
+      "selfcheck_gpt": {
+        "accuracy": 1.0,
+        "macro_f1": 1.0,
+        "per_label": {
+          "S": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 10,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 1.0,
+        "total_claims": 10
+      }
+    },
+    "truthfulqa": {
+      "cove": {
+        "accuracy": 0.4,
+        "macro_f1": 0.4145658263305322,
+        "per_label": {
+          "S": {
+            "precision": 0.45454545454545453,
+            "recall": 0.5,
+            "f1": 0.47619047619047616,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.42857142857142855,
+            "recall": 0.3,
+            "f1": 0.3529411764705882,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 4,
+            "N": 1
+          },
+          "C": {
+            "S": 6,
+            "C": 3,
+            "N": 1
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.4,
+        "total_claims": 20
+      },
+      "selfcheck_gpt": {
+        "accuracy": 0.5,
+        "macro_f1": 0.40476190476190477,
+        "per_label": {
+          "S": {
+            "precision": 0.5,
+            "recall": 0.9,
+            "f1": 0.6428571428571429,
+            "support": 10
+          },
+          "C": {
+            "precision": 0.5,
+            "recall": 0.1,
+            "f1": 0.16666666666666669,
+            "support": 10
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 9,
+            "C": 1,
+            "N": 0
+          },
+          "C": {
+            "S": 9,
+            "C": 1,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 20,
+        "claim_accuracy": 0.5,
+        "total_claims": 20
+      }
+    },
+    "scifact": {
+      "cove": {
+        "accuracy": 0.6,
+        "macro_f1": 0.44444444444444436,
+        "per_label": {
+          "S": {
+            "precision": 0.75,
+            "recall": 0.6,
+            "f1": 0.6666666666666665,
+            "support": 5
+          },
+          "C": {
+            "precision": 0.6,
+            "recall": 0.75,
+            "f1": 0.6666666666666665,
+            "support": 4
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 3,
+            "C": 2,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 3,
+            "N": 1
+          },
+          "N": {
+            "S": 1,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.6,
+        "total_claims": 10
+      },
+      "selfcheck_gpt": {
+        "accuracy": 0.9,
+        "macro_f1": 0.6363636363636364,
+        "per_label": {
+          "S": {
+            "precision": 0.8333333333333334,
+            "recall": 1.0,
+            "f1": 0.9090909090909091,
+            "support": 5
+          },
+          "C": {
+            "precision": 1.0,
+            "recall": 1.0,
+            "f1": 1.0,
+            "support": 4
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 1
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 5,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 4,
+            "N": 0
+          },
+          "N": {
+            "S": 1,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 10,
+        "claim_accuracy": 0.9,
+        "total_claims": 10
+      }
+    }
+  },
+  "raw_results": {
+    "fever": {
+      "cove": [
+        {
+          "sample_id": "fever_000000",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000001",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000002",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000003",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000004",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000005",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000006",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000007",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000008",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000009",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        }
+      ],
+      "selfcheck_gpt": [
+        {
+          "sample_id": "fever_000000",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000001",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000002",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000003",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000004",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000005",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000006",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000007",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000008",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "fever_000009",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        }
+      ]
+    },
+    "truthfulqa": {
+      "cove": [
+        {
+          "sample_id": "tqa_0000_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0000_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0001_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0001_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0002_S",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0002_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0003_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0003_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0004_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0004_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0005_S",
+          "predicted": "N",
+          "gold": "S",
+          "confidence": 0.5
+        },
+        {
+          "sample_id": "tqa_0005_C",
+          "predicted": "N",
+          "gold": "C",
+          "confidence": 0.5
+        },
+        {
+          "sample_id": "tqa_0006_S",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.8
+        },
+        {
+          "sample_id": "tqa_0006_C",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0007_S",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0007_C",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0008_S",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0008_C",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "tqa_0009_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0009_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        }
+      ],
+      "selfcheck_gpt": [
+        {
+          "sample_id": "tqa_0000_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0000_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0001_S",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.7
+        },
+        {
+          "sample_id": "tqa_0001_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0002_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0002_C",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.7
+        },
+        {
+          "sample_id": "tqa_0003_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "tqa_0003_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0004_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0004_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0005_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "tqa_0005_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0006_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0006_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0007_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0007_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "tqa_0008_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0008_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0009_S",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "tqa_0009_C",
+          "predicted": "S",
+          "gold": "C",
+          "confidence": 1.0
+        }
+      ]
+    },
+    "scifact": {
+      "cove": [
+        {
+          "sample_id": "sf_0000",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "sf_0001",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "sf_0002",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "sf_0003",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0004",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0005",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "sf_0006",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "sf_0007",
+          "predicted": "N",
+          "gold": "C",
+          "confidence": 0.5
+        },
+        {
+          "sample_id": "sf_0008",
+          "predicted": "C",
+          "gold": "S",
+          "confidence": 0.8
+        },
+        {
+          "sample_id": "sf_0009",
+          "predicted": "S",
+          "gold": "N",
+          "confidence": 0.9
+        }
+      ],
+      "selfcheck_gpt": [
+        {
+          "sample_id": "sf_0000",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "sf_0001",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.9
+        },
+        {
+          "sample_id": "sf_0002",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0003",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0004",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0005",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0006",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0007",
+          "predicted": "C",
+          "gold": "C",
+          "confidence": 0.95
+        },
+        {
+          "sample_id": "sf_0008",
+          "predicted": "S",
+          "gold": "S",
+          "confidence": 1.0
+        },
+        {
+          "sample_id": "sf_0009",
+          "predicted": "S",
+          "gold": "N",
+          "confidence": 0.95
+        }
+      ]
+    }
+  }
+}

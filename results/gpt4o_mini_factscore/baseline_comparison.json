@@ -1,0 +1,252 @@
+{
+  "timestamp": "2026-03-30T14:29:17.004328",
+  "config": {
+    "baselines": [
+      "factscore",
+      "safe",
+      "retrieve_nli"
+    ],
+    "benchmarks": [
+      "factscore"
+    ],
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "manual": true
+  },
+  "metrics": {
+    "factscore": {
+      "factscore": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.0,
+        "total_claims": 40
+      },
+      "safe": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.375,
+        "total_claims": 40
+      },
+      "retrieve_nli": {
+        "accuracy": 0.0,
+        "macro_f1": 0.0,
+        "per_label": {
+          "S": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "C": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          },
+          "N": {
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "support": 0
+          }
+        },
+        "confusion_matrix": {
+          "S": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "C": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          },
+          "N": {
+            "S": 0,
+            "C": 0,
+            "N": 0
+          }
+        },
+        "total": 5,
+        "claim_accuracy": 0.0,
+        "total_claims": 40
+      }
+    }
+  },
+  "raw_results": {
+    "factscore": {
+      "factscore": [
+        {
+          "sample_id": "fs_0000",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.0
+        },
+        {
+          "sample_id": "fs_0001",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.0
+        },
+        {
+          "sample_id": "fs_0002",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.0
+        },
+        {
+          "sample_id": "fs_0003",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.0
+        },
+        {
+          "sample_id": "fs_0004",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.0
+        }
+      ],
+      "safe": [
+        {
+          "sample_id": "fs_0000",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.625
+        },
+        {
+          "sample_id": "fs_0001",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.5
+        },
+        {
+          "sample_id": "fs_0002",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.375
+        },
+        {
+          "sample_id": "fs_0003",
+          "predicted": "C",
+          "gold": "mixed",
+          "confidence": 0.125
+        },
+        {
+          "sample_id": "fs_0004",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.25
+        }
+      ],
+      "retrieve_nli": [
+        {
+          "sample_id": "fs_0000",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.725
+        },
+        {
+          "sample_id": "fs_0001",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.7
+        },
+        {
+          "sample_id": "fs_0002",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.7124999999999999
+        },
+        {
+          "sample_id": "fs_0003",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.725
+        },
+        {
+          "sample_id": "fs_0004",
+          "predicted": "N",
+          "gold": "mixed",
+          "confidence": 0.7625
+        }
+      ]
+    }
+  }
+}
