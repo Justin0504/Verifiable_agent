@@ -36,25 +36,70 @@ class AdversarialSample:
     metadata: dict = field(default_factory=dict)
 
 
-_STOP_ENTITIES = {
+# ── Shared entity extraction ──────────────────────────────────────────
+
+_NON_ENTITIES = {
+    # Determiners / pronouns / prepositions
     "The", "This", "That", "These", "Those", "It", "He", "She", "They",
     "In", "On", "At", "By", "For", "From", "With", "About", "After",
     "Before", "During", "Between", "Since", "Until", "Into", "Through",
-    "However", "Moreover", "Furthermore", "Therefore", "Although",
+    # Conjunctions / adverbs
+    "However", "Moreover", "Furthermore", "Therefore", "Although", "Also",
+    "Because", "While", "Where", "When", "Which", "What", "Who", "How",
+    # Months / days
     "January", "February", "March", "April", "May", "June", "July",
     "August", "September", "October", "November", "December",
     "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
-    "According", "Research", "Studies", "Evidence", "Data",
+    # Common nouns that get capitalized at sentence start
+    "According", "Research", "Studies", "Evidence", "Data", "Scientists",
+    # Non-entity proper-looking words (units, elements, generic nouns)
+    "Celsius", "Fahrenheit", "Kelvin", "Water", "Gold", "Iron", "Carbon",
+    "Ocean", "River", "Lake", "Mountain", "Desert", "Island", "Reef",
+    "Tower", "Bridge", "Wall", "Gate", "Palace", "Castle", "Temple",
+    "North", "South", "East", "West", "Earth", "World", "Universe",
+    "Yes", "No", "True", "False", "Both", "Many", "Most", "Some",
+    "Nobel", "Prize", "Award", "University", "Institute", "College",
+    # Country/continent names that are too generic for person-like strategies
+    "Japan", "China", "India", "France", "Germany", "Italy", "Spain",
+    "Russia", "Brazil", "Mexico", "Canada", "Australia", "Korea",
+    "Africa", "Asia", "Europe", "America", "Antarctica",
 }
 
 
 def extract_entities(text: str) -> list[str]:
-    """Extract proper noun entities, filtering out common false positives."""
-    candidates = re.findall(r'([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+)', text)
-    singles = re.findall(r'\b([A-Z][a-z]{3,})\b', text)
-    all_candidates = candidates + singles
-    return [e for e in all_candidates if e.split()[0] not in _STOP_ENTITIES]
+    """Extract proper noun entities (persons, organizations, places).
 
+    Prefers multi-word names, filters out common false positives.
+    """
+    # Multi-word capitalized sequences (strongest signal)
+    multi = re.findall(r'([A-Z][a-z]{1,}(?:\s+[A-Z][a-z]{1,})+)', text)
+    # Single proper nouns (>3 chars, preceded by space — not sentence start)
+    singles = re.findall(r'(?<=\s)([A-Z][a-z]{3,})', text)
+    inner_singles: list[str] = []
+
+    all_candidates = multi + singles + inner_singles
+    # Filter: remove words where ANY part is in the stop list
+    filtered = []
+    seen = set()
+    for e in all_candidates:
+        words = e.split()
+        if all(w not in _NON_ENTITIES for w in words) and e not in seen:
+            filtered.append(e)
+            seen.add(e)
+    return filtered
+
+
+def _is_person_entity(entity: str, claim: str) -> bool:
+    """Heuristic: does this entity refer to a person?"""
+    person_signals = [
+        r'\b' + re.escape(entity) + r"'s\b",
+        r'\b' + re.escape(entity) + r'\s+(?:was|is|had|has|won|wrote|discovered|invented|created|founded|born|died)',
+        r'(?:by|of)\s+' + re.escape(entity),
+    ]
+    return any(re.search(p, claim, re.IGNORECASE) for p in person_signals)
+
+
+# ── Base class ─────────────────────────────────────────────────────────
 
 class AdversarialStrategy(ABC):
     """Base class for adversarial perturbation strategies."""
@@ -72,173 +117,256 @@ class AdversarialStrategy(ABC):
         metadata: dict,
         rng: random.Random,
     ) -> list[AdversarialSample]:
-        """Generate adversarial variants of a claim.
-
-        Args:
-            claim: Original claim text.
-            label: Original gold label ("S", "C", "N").
-            evidence: Supporting evidence passages.
-            metadata: Additional context (topic, category, etc.).
-            rng: Seeded random generator for reproducibility.
-
-        Returns:
-            List of AdversarialSample objects (may produce 0 if not applicable).
-        """
         ...
 
+
+# ── Strategy 1: Numerical Perturbation ────────────────────────────────
 
 class NumericalPerturbStrategy(AdversarialStrategy):
     """Perturb numbers in claims to create subtle contradictions.
 
-    Changes years, quantities, percentages, and measurements by small amounts
-    that are wrong but plausible. The gold label flips from S → C.
+    Handles: years, large numbers, small numbers, ordinals, percentages,
+    and spelled-out numbers.
     """
 
     name = "numerical_perturb"
     description = "Subtly alter numbers to create contradictions"
     output_label = "C"
 
+    # Spelled-out numbers to digit mapping
+    SPELLED = {
+        "zero": 0, "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+        "six": 6, "seven": 7, "eight": 8, "nine": 9, "ten": 10,
+        "eleven": 11, "twelve": 12, "thirteen": 13, "fourteen": 14,
+        "fifteen": 15, "sixteen": 16, "seventeen": 17, "eighteen": 18,
+        "nineteen": 19, "twenty": 20, "thirty": 30, "forty": 40, "fifty": 50,
+        "hundred": 100, "thousand": 1000, "million": 1000000, "billion": 1000000000,
+    }
+    DIGIT_TO_SPELLED = {v: k for k, v in SPELLED.items() if v <= 20}
+
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
         if label != "S":
             return []
 
-        numbers = list(re.finditer(r'\b(\d{1,4}(?:,\d{3})*(?:\.\d+)?)\b', claim))
-        if not numbers:
-            return []
-
         results = []
-        for match in numbers[:2]:  # Perturb up to 2 numbers per claim
-            original_num = match.group(1)
-            num_val = float(original_num.replace(",", ""))
 
-            # Choose perturbation based on magnitude
-            if num_val > 1900 and num_val < 2100:
-                # Likely a year — shift by 1-3
-                delta = rng.choice([-3, -2, -1, 1, 2, 3])
-                new_val = int(num_val + delta)
-                new_str = str(new_val)
-                explanation = f"Changed year {original_num} → {new_str} (off by {abs(delta)})"
-            elif num_val > 100:
-                # Large number — percentage shift
-                pct = rng.uniform(0.05, 0.20)
-                direction = rng.choice([-1, 1])
-                new_val = num_val * (1 + direction * pct)
-                if num_val == int(num_val):
-                    new_str = f"{int(new_val):,}" if "," in original_num else str(int(new_val))
-                else:
-                    new_str = f"{new_val:.1f}"
-                explanation = f"Changed {original_num} → {new_str} ({direction * pct:+.0%})"
-            elif num_val < 100:
-                # Small number — shift by 1-5
-                delta = rng.choice([-5, -3, -2, -1, 1, 2, 3, 5])
-                new_val = max(0, num_val + delta)
-                if num_val == int(num_val):
-                    new_str = str(int(new_val))
-                else:
-                    new_str = f"{new_val:.1f}"
-                explanation = f"Changed {original_num} → {new_str} (off by {abs(delta)})"
-            else:
-                continue
+        # Pattern 1: Digit-based numbers
+        digit_numbers = list(re.finditer(r'\b(\d{1,10}(?:,\d{3})*(?:\.\d+)?)\b', claim))
+        for match in digit_numbers[:2]:
+            perturbed_claim = self._perturb_digit(claim, match, rng)
+            if perturbed_claim:
+                results.append(perturbed_claim)
 
-            perturbed = claim[:match.start(1)] + new_str + claim[match.end(1):]
+        # Pattern 2: Spelled-out numbers ("two Nobel Prizes")
+        for word, val in self.SPELLED.items():
+            pattern = re.compile(r'\b' + word + r'\b', re.IGNORECASE)
+            m = pattern.search(claim)
+            if m and val <= 20 and val > 0:
+                delta = rng.choice([-2, -1, 1, 2])
+                new_val = max(1, val + delta)
+                if new_val in self.DIGIT_TO_SPELLED:
+                    new_word = self.DIGIT_TO_SPELLED[new_val]
+                    # Preserve original case
+                    if m.group(0)[0].isupper():
+                        new_word = new_word.capitalize()
+                    perturbed = claim[:m.start()] + new_word + claim[m.end():]
+                    results.append(AdversarialSample(
+                        id="", claim=perturbed, gold_label="C",
+                        strategy=self.name, difficulty="hard",
+                        original_claim=claim, evidence=evidence,
+                        explanation=f"Changed spelled number '{m.group(0)}' → '{new_word}'",
+                    ))
+                break  # One spelled number per claim
 
+        # Pattern 3: Ordinals ("1st", "2nd", "16th")
+        ordinals = list(re.finditer(r'\b(\d+)(?:st|nd|rd|th)\b', claim))
+        for m in ordinals[:1]:
+            val = int(m.group(1))
+            delta = rng.choice([-2, -1, 1, 2])
+            new_val = max(1, val + delta)
+            suffix = "th"
+            if new_val % 10 == 1 and new_val != 11:
+                suffix = "st"
+            elif new_val % 10 == 2 and new_val != 12:
+                suffix = "nd"
+            elif new_val % 10 == 3 and new_val != 13:
+                suffix = "rd"
+            new_str = f"{new_val}{suffix}"
+            perturbed = claim[:m.start()] + new_str + claim[m.end():]
             results.append(AdversarialSample(
-                id="",  # assigned by generator
-                claim=perturbed,
-                gold_label="C",
-                strategy=self.name,
-                difficulty="medium",
-                original_claim=claim,
-                evidence=evidence,
-                explanation=explanation,
+                id="", claim=perturbed, gold_label="C",
+                strategy=self.name, difficulty="medium",
+                original_claim=claim, evidence=evidence,
+                explanation=f"Changed ordinal '{m.group(0)}' → '{new_str}'",
             ))
 
         return results
 
+    def _perturb_digit(self, claim, match, rng) -> AdversarialSample | None:
+        original_num = match.group(1)
+        num_val = float(original_num.replace(",", ""))
+
+        if num_val > 1900 and num_val < 2100:
+            delta = rng.choice([-3, -2, -1, 1, 2, 3])
+            new_val = int(num_val + delta)
+            new_str = str(new_val)
+            explanation = f"Changed year {original_num} → {new_str} (off by {abs(delta)})"
+        elif num_val >= 100:
+            pct = rng.uniform(0.05, 0.20)
+            direction = rng.choice([-1, 1])
+            new_val = num_val * (1 + direction * pct)
+            if num_val == int(num_val):
+                new_str = f"{int(new_val):,}" if "," in original_num else str(int(new_val))
+            else:
+                new_str = f"{new_val:.1f}"
+            explanation = f"Changed {original_num} → {new_str} ({direction * pct:+.0%})"
+        elif num_val > 0:
+            delta = rng.choice([-3, -2, -1, 1, 2, 3])
+            new_val = max(1, num_val + delta)
+            new_str = str(int(new_val)) if num_val == int(num_val) else f"{new_val:.1f}"
+            explanation = f"Changed {original_num} → {new_str} (off by {abs(delta)})"
+        else:
+            return None
+
+        perturbed = claim[:match.start(1)] + new_str + claim[match.end(1):]
+        return AdversarialSample(
+            id="", claim=perturbed, gold_label="C",
+            strategy=self.name, difficulty="medium",
+            original_claim=claim, evidence=[],
+            explanation=explanation,
+        )
+
+
+# ── Strategy 2: Multi-Hop Graft ───────────────────────────────────────
 
 class MultiHopGraftStrategy(AdversarialStrategy):
-    """Combine two claims into a compound claim requiring multi-hop reasoning.
+    """Combine claims into multi-hop reasoning chains.
 
-    Takes two related claims and creates a new claim that requires
-    understanding both to verify. Tests compositional reasoning.
+    Works with or without years — can use entities, locations, or
+    causal relationships as the linking dimension.
     """
 
     name = "multi_hop_graft"
     description = "Combine claims into multi-hop reasoning chains"
-    output_label = "S"  # or "C" depending on construction
+    output_label = "S"
 
-    TEMPLATES = [
-        "The {entity_a} of {subject_a}, which {fact_b}, {claim_tail_a}.",
-        "{subject_a}, who {fact_b}, {claim_tail_a}.",
-        "In the same year that {fact_b}, {claim_a_rephrased}.",
-        "Unlike {contrast_entity}, {claim_a_rephrased}.",
-    ]
+    # Known entity → related fact pairs for grafting
+    ENTITY_FACTS = {
+        "Einstein": "who developed the theory of relativity",
+        "Newton": "who formulated the laws of motion",
+        "Darwin": "who proposed the theory of evolution",
+        "Shakespeare": "who wrote plays at the Globe Theatre",
+        "Curie": "who researched radioactivity",
+        "Tesla": "who pioneered alternating current",
+        "Edison": "who held over 1,000 patents",
+        "Galileo": "who improved the telescope",
+        "Napoleon": "who crowned himself Emperor of France",
+        "Columbus": "who sailed across the Atlantic in 1492",
+        "Fleming": "who worked at St Mary's Hospital",
+        "Turing": "who broke the Enigma code",
+    }
 
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
-        # This strategy needs a partner claim — store for batch processing
-        # For single-claim mode, create self-referential multi-hop
         if label != "S":
             return []
 
-        # Extract year if present
+        results = []
+
+        # Method 1: Temporal multi-hop (if year present)
         year_match = re.search(r'\b(1[0-9]{3}|20[0-2][0-9])\b', claim)
-        if not year_match:
-            return []
+        if year_match:
+            year = int(year_match.group(1))
+            offset = rng.randint(1, 8)
+            # Ensure the math works out correctly (verifiably true)
+            base_year = year - offset
+            templates = [
+                f"{offset} years after {base_year}, {claim[0].lower() + claim[1:]}",
+                f"In the {year // 10 * 10}s, {claim[0].lower() + claim[1:]}",
+            ]
+            chosen = rng.choice(templates)
+            results.append(AdversarialSample(
+                id="", claim=chosen, gold_label="S",
+                strategy=self.name, difficulty="hard",
+                original_claim=claim, evidence=evidence,
+                explanation=f"Added temporal multi-hop: {offset} years after {base_year} = {year}",
+            ))
 
-        year = year_match.group(1)
+        # Method 2: Entity-linked multi-hop (no year needed)
+        entities = extract_entities(claim)
+        for entity in entities:
+            for name_key, fact in self.ENTITY_FACTS.items():
+                if name_key.lower() in entity.lower():
+                    connector = rng.choice([
+                        f"{entity}, {fact},",
+                        f"The scientist {fact}, {entity},",
+                    ])
+                    # Rebuild: "{entity}, {related fact}, {rest of claim}"
+                    rest = claim[claim.find(entity) + len(entity):].strip().lstrip(",").strip()
+                    if rest:
+                        grafted = f"{connector} {rest}"
+                    else:
+                        grafted = f"{connector} is well documented."
+                    results.append(AdversarialSample(
+                        id="", claim=grafted, gold_label="S",
+                        strategy=self.name, difficulty="hard",
+                        original_claim=claim, evidence=evidence,
+                        explanation=f"Grafted related fact about {entity} to create multi-hop verification",
+                    ))
+                    break
 
-        # Create a multi-hop by adding a temporal qualifier
-        templates = [
-            f"{rng.randint(1, 10)} years after {int(year) - rng.randint(1, 10)}, {claim.lower()}",
-            f"In the decade that began with {int(year) - int(year) % 10}, {claim.lower()}",
-            f"During the same century as the founding of {rng.choice(['MIT', 'Stanford', 'Oxford', 'Harvard'])}, {claim.lower()}",
-        ]
+        # Method 3: Negation-based multi-hop (create a "not X but Y" structure)
+        if not results:
+            wrong_claims = {
+                "Paris": "not in London but in Paris",
+                "Tokyo": "not in Beijing but in Tokyo",
+                "1928": "not in the 1930s but in 1928",
+                "first": "not the second but the first",
+            }
+            for keyword, replacement in wrong_claims.items():
+                if keyword in claim:
+                    # Insert "not X but Y" structure
+                    grafted = claim.replace(keyword, replacement, 1)
+                    results.append(AdversarialSample(
+                        id="", claim=grafted, gold_label="S",
+                        strategy=self.name, difficulty="medium",
+                        original_claim=claim, evidence=evidence,
+                        explanation=f"Added contrastive multi-hop: '{replacement}'",
+                    ))
+                    break
 
-        chosen = rng.choice(templates)
+        return results[:1]  # Return at most 1
 
-        return [AdversarialSample(
-            id="",
-            claim=chosen,
-            gold_label="S",
-            strategy=self.name,
-            difficulty="hard",
-            original_claim=claim,
-            evidence=evidence,
-            explanation=f"Wrapped claim in multi-hop temporal reasoning around year {year}",
-        )]
 
+# ── Strategy 3: Presupposition ─────────────────────────────────────────
 
 class PresuppositionStrategy(AdversarialStrategy):
-    """Inject false presuppositions into claims.
-
-    Adds a false premise that makes the claim look plausible but is actually
-    built on incorrect assumptions. Tests whether verifiers catch the
-    hidden false premise.
-    """
+    """Inject false presuppositions — only for person/organization entities."""
 
     name = "presupposition"
     description = "Inject false presuppositions into claims"
     output_label = "C"
 
-    FALSE_PRESUPPOSITIONS = [
-        ("was born in {wrong_place}", "false birthplace"),
-        ("who was known for {wrong_achievement}", "false achievement"),
-        ("which occurred in {wrong_year}", "false year"),
-        ("the {wrong_nationality} {entity}", "false nationality"),
-        ("after winning the {wrong_award}", "false award"),
-        ("during the {wrong_era} era", "false time period"),
+    PERSON_TEMPLATES = [
+        ("born in {wrong_place}", "false birthplace"),
+        ("known for {wrong_achievement}", "false achievement"),
+        ("the {wrong_nationality} scientist", "false nationality"),
     ]
 
-    WRONG_PLACES = ["London", "New York", "Tokyo", "Berlin", "Moscow", "Beijing", "Sydney", "Rome"]
+    ORG_TEMPLATES = [
+        ("founded in {wrong_year}", "false founding year"),
+        ("headquartered in {wrong_place}", "false location"),
+        ("established during the {wrong_era} era", "false time period"),
+    ]
+
+    WRONG_PLACES = ["London", "New York", "Tokyo", "Berlin", "Moscow", "Beijing", "Sydney",
+                    "Rome", "Cairo", "Rio de Janeiro", "Toronto", "Seoul"]
     WRONG_ACHIEVEMENTS = [
-        "inventing the telescope", "discovering America", "writing the first novel",
-        "building the first computer", "founding the United Nations", "discovering oxygen",
+        "inventing the telescope", "discovering oxygen", "writing the first novel",
+        "building the first computer", "founding the United Nations",
+        "circumnavigating the globe", "splitting the atom",
     ]
-    WRONG_NATIONALITIES = ["French", "German", "Japanese", "Russian", "Italian", "Brazilian", "Canadian"]
-    WRONG_AWARDS = [
-        "Nobel Peace Prize", "Fields Medal", "Pulitzer Prize",
-        "Academy Award", "Grammy Award", "Turing Award",
-    ]
+    WRONG_NATIONALITIES = ["French", "German", "Japanese", "Russian", "Italian",
+                          "Brazilian", "Canadian", "Australian", "Swedish", "Chinese"]
     WRONG_ERAS = ["Renaissance", "Victorian", "Medieval", "Baroque", "Enlightenment", "Industrial"]
 
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
@@ -249,62 +377,82 @@ class PresuppositionStrategy(AdversarialStrategy):
         if not entities:
             return []
 
-        entity = rng.choice(entities)
-        template_idx = rng.randint(0, len(self.FALSE_PRESUPPOSITIONS) - 1)
-        template, desc = self.FALSE_PRESUPPOSITIONS[template_idx]
+        # Prefer person entities
+        person_entities = [e for e in entities if _is_person_entity(e, claim)]
+        if person_entities:
+            entity = rng.choice(person_entities)
+            template, desc = rng.choice(self.PERSON_TEMPLATES)
+        elif len(entities[0].split()) >= 2:
+            # Multi-word entity likely an org or place
+            entity = entities[0]
+            template, desc = rng.choice(self.ORG_TEMPLATES)
+        else:
+            return []  # Can't safely inject presupposition
 
-        # Fill template
         filled = template.format(
             wrong_place=rng.choice(self.WRONG_PLACES),
             wrong_achievement=rng.choice(self.WRONG_ACHIEVEMENTS),
-            wrong_year=str(rng.randint(1800, 2020)),
             wrong_nationality=rng.choice(self.WRONG_NATIONALITIES),
-            entity=entity,
-            wrong_award=rng.choice(self.WRONG_AWARDS),
+            wrong_year=str(rng.randint(1800, 2020)),
             wrong_era=rng.choice(self.WRONG_ERAS),
         )
 
-        # Inject presupposition
-        injection_patterns = [
-            f"{entity}, {filled}, {claim[claim.find(entity) + len(entity):].strip().lstrip(',')}",
-            f"Since {entity} {filled}, {claim.lower()}",
-            f"Given that {entity} {filled}, it follows that {claim.lower()}",
-        ]
+        # Clean injection patterns — keep original claim casing intact
+        pattern = rng.choice([
+            f"Although {entity} was {filled}, {claim}",
+            f"Despite being {filled}, {claim}",
+            f"Contrary to popular belief that {entity} was {filled}, {claim}",
+        ])
 
-        chosen = rng.choice(injection_patterns)
+        # Ensure proper ending
+        if not pattern.endswith("."):
+            pattern += "."
 
         return [AdversarialSample(
-            id="",
-            claim=chosen,
-            gold_label="C",
-            strategy=self.name,
-            difficulty="hard",
-            original_claim=claim,
-            evidence=evidence,
-            explanation=f"Injected false presupposition: {desc} for entity '{entity}'",
+            id="", claim=pattern, gold_label="C",
+            strategy=self.name, difficulty="hard",
+            original_claim=claim, evidence=evidence,
+            explanation=f"Injected false presupposition ({desc}) for '{entity}'",
         )]
 
+    @staticmethod
+    def _extract_predicate(entity: str, claim: str) -> str:
+        """Extract the predicate (what comes after the entity in the claim)."""
+        idx = claim.find(entity)
+        if idx >= 0:
+            rest = claim[idx + len(entity):].strip().lstrip(",").strip()
+            if rest:
+                return rest
+        return claim[0].lower() + claim[1:]
+
+
+# ── Strategy 4: Unanswerable Wrap ──────────────────────────────────────
 
 class UnanswerableWrapStrategy(AdversarialStrategy):
-    """Transform claims into questions that appear answerable but lack evidence.
+    """Transform claims into questions about unrecorded/subjective information.
 
-    Wraps a factual claim in a question format that asks about something
-    unprovable or unrecorded, making the expected answer "not enough info".
+    Only wraps around person entities to avoid nonsensical questions.
     """
 
     name = "unanswerable_wrap"
     description = "Wrap claims in unanswerable question format"
     output_label = "N"
 
-    WRAP_TEMPLATES = [
+    PERSON_TEMPLATES = [
         "What was {entity}'s personal opinion about {topic}?",
-        "How did {entity} feel when {event}?",
+        "How did {entity} feel about {topic} later in life?",
         "What would have happened if {entity} had not {action}?",
-        "Did {entity} regret {action}?",
-        "What was {entity} thinking about on the day of {event}?",
-        "How many times did {entity} attempt {action} before succeeding?",
-        "What inspired {entity} to pursue {topic}?",
-        "Who was {entity}'s closest friend during {event}?",
+        "Did {entity} ever express regret about {action}?",
+        "What was {entity}'s motivation for {action}?",
+        "Who influenced {entity} most in their early career?",
+        "What was {entity}'s daily routine while working on {topic}?",
+        "How did {entity}'s family react to {action}?",
+    ]
+
+    GENERIC_TEMPLATES = [
+        "What would the world look like today if {event} had never happened?",
+        "How did contemporaries privately feel about {event}?",
+        "What were the undocumented consequences of {event}?",
     ]
 
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
@@ -312,171 +460,166 @@ class UnanswerableWrapStrategy(AdversarialStrategy):
             return []
 
         entities = extract_entities(claim)
-        if not entities:
-            return []
+        person_entities = [e for e in entities if _is_person_entity(e, claim)]
 
-        entity = entities[0]
-
-        # Extract verb phrases as potential actions
-        verbs = re.findall(r'\b(?:discovered|invented|wrote|built|founded|won|created|developed|published)\s+\w+(?:\s+\w+)?', claim.lower())
-        action = verbs[0] if verbs else "this achievement"
-
-        # Extract topics
-        topics = re.findall(r'(?:the\s+)?(?:theory of|study of|field of|concept of)\s+\w+', claim.lower())
-        topic = topics[0] if topics else "this work"
-
-        # Extract events
-        year_match = re.search(r'\b(1[0-9]{3}|20[0-2][0-9])\b', claim)
-        event = f"the events of {year_match.group(1)}" if year_match else action
-
-        template = rng.choice(self.WRAP_TEMPLATES)
-        question = template.format(
-            entity=entity,
-            topic=topic,
-            event=event,
-            action=action,
+        # Extract meaningful action/topic from the claim
+        verbs = re.findall(
+            r'\b(?:discovered|invented|wrote|built|founded|won|created|developed|'
+            r'published|proposed|proved|demonstrated|established|introduced|designed)\s+'
+            r'(?:the\s+)?[\w\s]{3,30}',
+            claim.lower(),
         )
+        action = verbs[0] if verbs else None
+
+        # Extract topic from the claim (after "about", "of", or key nouns)
+        topic_match = re.search(r'(?:theory of|study of|discovery of|invention of)\s+[\w\s]+', claim.lower())
+        topic = topic_match.group(0) if topic_match else None
+
+        if person_entities:
+            entity = rng.choice(person_entities)
+            template = rng.choice(self.PERSON_TEMPLATES)
+            # Clean up action for template: "won two nobel prizes" → "winning two Nobel Prizes"
+            action_clean = action or "their most notable achievement"
+            if action_clean.startswith(("discovered", "invented", "wrote", "built",
+                                        "founded", "won", "created", "developed")):
+                # Convert past tense to gerund for natural phrasing
+                verb = action_clean.split()[0]
+                gerund_map = {
+                    "discovered": "discovering", "invented": "inventing",
+                    "wrote": "writing", "built": "building", "founded": "founding",
+                    "won": "winning", "created": "creating", "developed": "developing",
+                    "published": "publishing", "proposed": "proposing",
+                }
+                if verb in gerund_map:
+                    action_clean = gerund_map[verb] + action_clean[len(verb):]
+
+            question = template.format(
+                entity=entity,
+                topic=topic or action_clean or "their most famous work",
+                action=action_clean,
+            )
+        elif action:
+            # Use generic event-based template
+            template = rng.choice(self.GENERIC_TEMPLATES)
+            question = template.format(event=action)
+        else:
+            return []  # Can't generate a meaningful unanswerable question
 
         return [AdversarialSample(
-            id="",
-            claim=question,
-            gold_label="N",
-            strategy=self.name,
-            difficulty="hard",
-            original_claim=claim,
-            evidence=evidence,
-            explanation=f"Transformed factual claim about {entity} into unanswerable question about subjective/unrecorded information",
+            id="", claim=question, gold_label="N",
+            strategy=self.name, difficulty="hard",
+            original_claim=claim, evidence=evidence,
+            explanation=f"Converted factual claim into unanswerable question about subjective/undocumented aspects",
         )]
 
 
-class ParaphraseStrategy(AdversarialStrategy):
-    """Rephrase claims while preserving semantics.
+# ── Strategy 5: Paraphrase ────────────────────────────────────────────
 
-    Tests verifier robustness — a correct verifier should give the same
-    label regardless of surface form. Uses rule-based transformations.
-    """
+class ParaphraseStrategy(AdversarialStrategy):
+    """Rephrase claims with safe, grammatically correct transformations."""
 
     name = "paraphrase"
     description = "Rephrase claims to test verifier robustness"
     output_label = ""  # same as original
 
-    TRANSFORMS = [
-        # Active ↔ Passive patterns
-        (r'(\w+)\s+(?:discovered|invented)\s+(.*)', r'\2 was discovered/invented by \1'),
-        (r'(\w+)\s+was awarded\s+(.*)', r'\2 was given to \1'),
-        (r'(\w+)\s+won\s+(.*)', r'\2 was won by \1'),
-        # Numeric rephrasing
-        (r'approximately (\d+)', r'around \1'),
-        (r'about (\d+)', r'roughly \1'),
-        (r'(\d+) years', r'a span of \1 years'),
-        # Temporal rephrasing
-        (r'in (\d{4})', r'during the year \1'),
-        (r'on (\w+ \d+, \d{4})', r'as of \1'),
+    HEDGES = [
+        "It is widely accepted that {claim}",
+        "Historical records confirm that {claim}",
+        "It has been established that {claim}",
+        "Scholars generally agree that {claim}",
+        "{claim}",  # No change (filtered out later)
     ]
 
-    HEDGES = [
-        "It is known that {}",
-        "According to historical records, {}",
-        "{}",  # no change
-        "Research indicates that {}",
-        "It has been established that {}",
+    TEMPORAL_SWAPS = [
+        (r'\bin (\d{4})\b', r'during the year \1'),
+        (r'\bin (\d{4})\b', r'as of \1'),
+        (r'\bapproximately (\d+)', r'roughly \1'),
+        (r'\babout (\d+)', r'approximately \1'),
+        (r'\baround (\d+)', r'close to \1'),
     ]
 
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
         if label not in ("S", "C"):
             return []
 
-        modified = claim
+        modified = claim.rstrip(".")
 
-        # Apply a random rule-based transform
-        for pattern, replacement in self.TRANSFORMS:
-            if re.search(pattern, modified, re.IGNORECASE):
-                modified = re.sub(pattern, replacement, modified, count=1, flags=re.IGNORECASE)
+        # Safe temporal swap (pick one at random)
+        swaps = list(self.TEMPORAL_SWAPS)
+        rng.shuffle(swaps)
+        for pattern, replacement in swaps:
+            if re.search(pattern, modified):
+                modified = re.sub(pattern, replacement, modified, count=1)
                 break
 
-        # Apply a hedge
+        # Apply hedge wrapper — preserve proper noun capitalization
         hedge = rng.choice(self.HEDGES)
-        if modified[0].isupper():
-            modified_lower = modified[0].lower() + modified[1:]
+        # Only lowercase the first char if it's NOT a proper noun (multi-word caps or known entity)
+        first_word = modified.split()[0] if modified else ""
+        is_proper = (
+            len(modified.split()) > 1
+            and modified.split()[1][0:1].isupper()  # "Marie Curie" → keep
+        ) or first_word not in ("The", "A", "An", "It", "In", "On", "At")
+
+        if is_proper:
+            claim_text = modified  # Keep original case
         else:
-            modified_lower = modified
-        modified = hedge.format(modified_lower)
+            claim_text = modified[0].lower() + modified[1:]
 
-        # Ensure first letter is capitalized
+        modified = hedge.format(claim=claim_text)
+
+        # Capitalize and punctuate
         modified = modified[0].upper() + modified[1:]
-
-        # Ensure ends with period
         if not modified.endswith("."):
             modified += "."
 
-        if modified == claim:
+        if modified.rstrip(".") == claim.rstrip("."):
             return []
 
         return [AdversarialSample(
-            id="",
-            claim=modified,
-            gold_label=label,  # same as original
-            strategy=self.name,
-            difficulty="easy",
-            original_claim=claim,
-            evidence=evidence,
-            explanation="Surface-form paraphrase; gold label should be unchanged",
+            id="", claim=modified, gold_label=label,
+            strategy=self.name, difficulty="easy",
+            original_claim=claim, evidence=evidence,
+            explanation="Surface-form paraphrase; gold label unchanged",
         )]
 
 
-class EntityConfusionStrategy(AdversarialStrategy):
-    """Swap attributes between similar entities to create subtle errors.
+# ── Strategy 6: Entity Confusion ──────────────────────────────────────
 
-    Takes a claim about entity A and replaces it with a similar entity B's
-    attributes, creating a plausible-looking but incorrect claim.
-    """
+class EntityConfusionStrategy(AdversarialStrategy):
+    """Swap attributes between similar entities to create subtle errors."""
 
     name = "entity_confusion"
     description = "Swap attributes between similar entities"
     output_label = "C"
 
-    # Pairs of commonly confused entities with their distinguishing attributes
     CONFUSION_PAIRS = [
-        {
-            "entities": ["Albert Einstein", "Niels Bohr"],
-            "swaps": {"1879": "1885", "Ulm": "Copenhagen", "photoelectric effect": "atomic model"},
-        },
-        {
-            "entities": ["Marie Curie", "Rosalind Franklin"],
-            "swaps": {"radium": "DNA structure", "1903": "1952", "Nobel Prize": "X-ray crystallography"},
-        },
-        {
-            "entities": ["Neil Armstrong", "Buzz Aldrin"],
-            "swaps": {"first person": "second person", "first man": "second man"},
-        },
-        {
-            "entities": ["Edison", "Tesla"],
-            "swaps": {"light bulb": "alternating current", "direct current": "alternating current", "Menlo Park": "New York"},
-        },
-        {
-            "entities": ["Newton", "Leibniz"],
-            "swaps": {"1665": "1675", "fluxions": "infinitesimals", "English": "German"},
-        },
-        {
-            "entities": ["Darwin", "Wallace"],
-            "swaps": {"On the Origin of Species": "the Malay Archipelago", "1859": "1858"},
-        },
-        {
-            "entities": ["Wright brothers", "Santos-Dumont"],
-            "swaps": {"1903": "1906", "Kitty Hawk": "Paris", "Flyer": "14-bis"},
-        },
-        {
-            "entities": ["Amazon River", "Nile River"],
-            "swaps": {"6,400": "6,650", "South America": "Africa", "discharge volume": "length"},
-        },
-        {
-            "entities": ["Mount Everest", "K2"],
-            "swaps": {"8,848": "8,611", "Nepal": "Pakistan", "highest": "second highest"},
-        },
-        {
-            "entities": ["Pacific Ocean", "Atlantic Ocean"],
-            "swaps": {"largest": "second largest", "Pacific": "Atlantic"},
-        },
+        # Scientists
+        {"entities": ["Albert Einstein", "Einstein"], "swaps": {"1879": "1885", "Ulm": "Copenhagen", "photoelectric effect": "atomic model", "1921": "1922"}},
+        {"entities": ["Marie Curie", "Curie"], "swaps": {"radium": "DNA structure", "1903": "1952", "polonium": "francium", "Warsaw": "Paris"}},
+        {"entities": ["Neil Armstrong"], "swaps": {"first person": "second person", "first man": "second man", "first to walk": "second to walk"}},
+        {"entities": ["Edison", "Thomas Edison"], "swaps": {"light bulb": "alternating current", "Menlo Park": "Wardenclyffe"}},
+        {"entities": ["Newton", "Isaac Newton"], "swaps": {"1665": "1675", "1687": "1696", "Principia": "Monadology"}},
+        {"entities": ["Darwin", "Charles Darwin"], "swaps": {"1859": "1858", "On the Origin of Species": "The Malay Archipelago", "Galápagos": "Borneo"}},
+        {"entities": ["Alexander Fleming", "Fleming"], "swaps": {"1928": "1935", "penicillin": "sulfonamide", "St Mary": "Cambridge"}},
+        {"entities": ["Galileo"], "swaps": {"1609": "1608", "Jupiter": "Saturn", "Italy": "Netherlands"}},
+        {"entities": ["Watson and Crick", "Watson"], "swaps": {"1953": "1951", "double helix": "triple helix"}},
+        {"entities": ["Turing", "Alan Turing"], "swaps": {"Enigma": "Lorenz", "1936": "1938", "Manchester": "Oxford"}},
+        # Geography
+        {"entities": ["Amazon River", "Amazon"], "swaps": {"6,400": "6,650", "South America": "Africa", "discharge volume": "length", "largest": "longest"}},
+        {"entities": ["Mount Everest", "Everest"], "swaps": {"8,848": "8,611", "Nepal": "Pakistan", "highest": "second highest", "Hillary": "Messner"}},
+        {"entities": ["Pacific Ocean", "Pacific"], "swaps": {"largest": "second largest", "Pacific": "Atlantic"}},
+        {"entities": ["Sahara"], "swaps": {"largest hot desert": "largest desert", "9.2 million": "14 million", "Africa": "Asia"}},
+        {"entities": ["Nile"], "swaps": {"6,650": "6,400", "longest": "largest", "Africa": "South America"}},
+        # Historical events
+        {"entities": ["Wright brothers", "Wright"], "swaps": {"1903": "1906", "Kitty Hawk": "Paris", "North Carolina": "France"}},
+        {"entities": ["Apollo 11"], "swaps": {"1969": "1968", "Armstrong": "Aldrin", "Eagle": "Columbia"}},
+        {"entities": ["Berlin Wall"], "swaps": {"1989": "1991", "November": "October", "1961": "1963"}},
+        {"entities": ["Titanic"], "swaps": {"1912": "1913", "April 15": "April 14", "iceberg": "reef"}},
+        # Tech
+        {"entities": ["Tim Berners-Lee", "Berners-Lee"], "swaps": {"1989": "1991", "CERN": "MIT", "World Wide Web": "Internet"}},
+        {"entities": ["Apple", "Steve Jobs"], "swaps": {"1976": "1977", "Steve Wozniak": "Bill Gates", "Apple II": "Macintosh"}},
+        {"entities": ["Bitcoin"], "swaps": {"2008": "2009", "2009": "2008", "Satoshi Nakamoto": "Hal Finney"}},
     ]
 
     def generate(self, claim, label, evidence, metadata, rng) -> list[AdversarialSample]:
@@ -484,44 +627,33 @@ class EntityConfusionStrategy(AdversarialStrategy):
             return []
 
         claim_lower = claim.lower()
-        results = []
 
         for pair in self.CONFUSION_PAIRS:
-            # Check if any entity from this pair is mentioned
             matched_entity = None
             for entity in pair["entities"]:
                 if entity.lower() in claim_lower:
                     matched_entity = entity
                     break
-
             if not matched_entity:
                 continue
 
-            # Apply swaps
             modified = claim
             applied_swaps = []
             for old, new in pair["swaps"].items():
                 if old.lower() in modified.lower():
-                    # Case-preserving replacement
                     pattern = re.compile(re.escape(old), re.IGNORECASE)
                     modified = pattern.sub(new, modified, count=1)
                     applied_swaps.append(f"{old} → {new}")
 
             if applied_swaps and modified != claim:
-                other_entity = [e for e in pair["entities"] if e != matched_entity]
-                results.append(AdversarialSample(
-                    id="",
-                    claim=modified,
-                    gold_label="C",
-                    strategy=self.name,
-                    difficulty="hard",
-                    original_claim=claim,
-                    evidence=evidence,
-                    explanation=f"Swapped attributes of {matched_entity} with {other_entity[0] if other_entity else 'similar entity'}: {'; '.join(applied_swaps)}",
-                ))
-                break  # One confusion per claim is enough
+                return [AdversarialSample(
+                    id="", claim=modified, gold_label="C",
+                    strategy=self.name, difficulty="hard",
+                    original_claim=claim, evidence=evidence,
+                    explanation=f"Swapped attributes of {matched_entity}: {'; '.join(applied_swaps)}",
+                )]
 
-        return results
+        return []
 
 
 # Registry of all strategies

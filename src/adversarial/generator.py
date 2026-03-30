@@ -88,27 +88,38 @@ class AdversarialGenerator:
         all_generated: list[AdversarialSample] = []
 
         for sample in samples:
-            for strategy, weight in active_with_weights:
-                # Probabilistic inclusion based on weight
-                if weight < 1.0 and self.rng.random() > weight:
-                    continue
+            # For FActScore-style samples with per-claim labels,
+            # expand individual claims as separate inputs
+            if sample.gold_label == "mixed" and sample.claims:
+                per_claim_labels = sample.metadata.get("per_claim_labels", [])
+                claim_inputs = []
+                for j, c in enumerate(sample.claims):
+                    lbl = per_claim_labels[j] if j < len(per_claim_labels) else "S"
+                    claim_inputs.append((c, lbl))
+            else:
+                claim_inputs = [(sample.question, sample.gold_label)]
 
-                for _ in range(self.samples_per_strategy):
-                    variants = strategy.generate(
-                        claim=sample.question,
-                        label=sample.gold_label,
-                        evidence=sample.evidence,
-                        metadata=sample.metadata,
-                        rng=self.rng,
-                    )
+            for claim_text, claim_label in claim_inputs:
+                for strategy, weight in active_with_weights:
+                    if weight < 1.0 and self.rng.random() > weight:
+                        continue
 
-                    for v in variants:
-                        self._counter += 1
-                        v.id = f"advfact_{source_name}_{self._counter:06d}"
-                        v.original_id = sample.id
-                        v.metadata["source_benchmark"] = source_name
-                        v.metadata["original_gold_label"] = sample.gold_label
-                        all_generated.append(v)
+                    for _ in range(self.samples_per_strategy):
+                        variants = strategy.generate(
+                            claim=claim_text,
+                            label=claim_label,
+                            evidence=sample.evidence,
+                            metadata=sample.metadata,
+                            rng=self.rng,
+                        )
+
+                        for v in variants:
+                            self._counter += 1
+                            v.id = f"advfact_{source_name}_{self._counter:06d}"
+                            v.original_id = sample.id
+                            v.metadata["source_benchmark"] = source_name
+                            v.metadata["original_gold_label"] = sample.gold_label
+                            all_generated.append(v)
 
         # Quality filter
         filtered = self.filter.filter_batch(all_generated)
