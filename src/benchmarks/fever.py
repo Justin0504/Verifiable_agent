@@ -36,15 +36,8 @@ class FEVERLoader(BenchmarkLoader):
     def load(self, split: str = "validation", limit: int | None = None) -> list[BenchmarkSample]:
         datasets = self._try_import_datasets()
 
-        # Map split names
-        split_map = {
-            "validation": "labelled_dev",
-            "train": "train",
-            "test": "labelled_dev",  # test set labels not public
-        }
-        actual_split = split_map.get(split, split)
-
-        ds = datasets.load_dataset("fever", "v1.0", split=actual_split, trust_remote_code=True)
+        # Use copenlu/fever_gold_evidence which includes evidence text
+        ds = datasets.load_dataset("copenlu/fever_gold_evidence", split=split)
 
         samples = []
         for i, row in enumerate(ds):
@@ -52,26 +45,24 @@ class FEVERLoader(BenchmarkLoader):
                 break
 
             claim = row.get("claim", "")
-            raw_label = row.get("label", 2)
+            raw_label = row.get("label", "NOT ENOUGH INFO")
 
             label_info = _LABEL_MAP.get(raw_label, ("NOT ENOUGH INFO", "N"))
             native_label, our_label = label_info
 
-            # Extract evidence
+            # Extract evidence from structured format
             evidence_texts = []
-            evidence_wiki = row.get("evidence_wiki_url", "")
-            evidence_sent = row.get("evidence_sentence", "")
-            if evidence_sent:
-                evidence_texts.append(evidence_sent)
-
-            # Some versions have structured evidence
             evidence_list = row.get("evidence", [])
             if isinstance(evidence_list, list):
                 for ev in evidence_list:
-                    if isinstance(ev, list):
-                        for item in ev:
-                            if isinstance(item, str) and item not in evidence_texts:
-                                evidence_texts.append(item)
+                    if isinstance(ev, list) and len(ev) >= 3:
+                        # Format: [wiki_title, sent_id, sentence_text]
+                        wiki_title = ev[0].replace("_", " ").replace("-LRB-", "(").replace("-RRB-", ")")
+                        sent_text = ev[2] if len(ev) > 2 else ""
+                        if sent_text:
+                            evidence_texts.append(f"[{wiki_title}] {sent_text}")
+                    elif isinstance(ev, str):
+                        evidence_texts.append(ev)
 
             sample = BenchmarkSample(
                 id=f"fever_{i:06d}",
@@ -82,7 +73,7 @@ class FEVERLoader(BenchmarkLoader):
                 metadata={
                     "risk_type": "missing_evidence",
                     "native_label": native_label,
-                    "evidence_wiki_url": evidence_wiki,
+                    "original_id": row.get("original_id", ""),
                 },
             )
             samples.append(sample)

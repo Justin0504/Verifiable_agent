@@ -123,6 +123,16 @@ def main() -> None:
         timestamp = datetime.now().strftime("%Y%m%d")
         output_path = f"data/adversarial/{source_tag}_hard_{timestamp}.jsonl"
 
+    # Default strategy weights: downweight paraphrase, boost hard strategies
+    default_weights = {
+        "numerical_perturb": 1.0,
+        "multi_hop_graft": 1.0,
+        "presupposition": 1.0,
+        "unanswerable_wrap": 1.0,
+        "paraphrase": 0.3,  # Reduce paraphrase dominance
+        "entity_confusion": 1.0,
+    }
+
     # Initialize generator
     quality_filter = QualityFilter(
         min_length=15,
@@ -166,9 +176,13 @@ def main() -> None:
                 samples, source_name,
                 target_size=per_source,
                 balance_labels=True,
+                strategy_weights=default_weights,
             )
         else:
-            adversarial = generator.generate_from_benchmark(samples, source_name)
+            adversarial = generator.generate_from_benchmark(
+                samples, source_name,
+                strategy_weights=default_weights,
+            )
 
         print(f"  Generated {len(adversarial)} adversarial samples")
 

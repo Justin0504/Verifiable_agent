@@ -132,6 +132,7 @@ class AdversarialGenerator:
         source_name: str = "unknown",
         target_size: int | None = None,
         balance_labels: bool = True,
+        strategy_weights: dict[str, float] | None = None,
     ) -> list[AdversarialSample]:
         """Generate a balanced adversarial dataset.
 
@@ -140,11 +141,14 @@ class AdversarialGenerator:
             source_name: Source benchmark name.
             target_size: Desired output size (None = all that pass filter).
             balance_labels: If True, balance S/C/N labels in output.
+            strategy_weights: Optional {strategy_name: weight} for sampling.
 
         Returns:
             Balanced, filtered adversarial dataset.
         """
-        all_samples = self.generate_from_benchmark(samples, source_name)
+        all_samples = self.generate_from_benchmark(
+            samples, source_name, strategy_weights=strategy_weights,
+        )
 
         if not balance_labels or not target_size:
             if target_size and len(all_samples) > target_size:

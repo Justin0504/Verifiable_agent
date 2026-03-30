@@ -1,0 +1,45 @@
+{
+  "name": "AdversarialFACT",
+  "version": "1.0",
+  "generated_at": "2026-03-30T01:46:04.984492",
+  "sources": [
+    "fever",
+    "truthfulqa",
+    "scifact",
+    "halueval",
+    "musique",
+    "factscore"
+  ],
+  "strategies": [
+    "numerical_perturb",
+    "multi_hop_graft",
+    "presupposition",
+    "unanswerable_wrap",
+    "paraphrase",
+    "entity_confusion"
+  ],
+  "seed": 42,
+  "stats": {
+    "total": 291,
+    "label_distribution": {
+      "S": 110,
+      "N": 55,
+      "C": 126
+    },
+    "strategy_distribution": {
+      "multi_hop_graft": 49,
+      "unanswerable_wrap": 55,
+      "entity_confusion": 10,
+      "numerical_perturb": 24,
+      "presupposition": 74,
+      "paraphrase": 79
+    },
+    "difficulty_distribution": {
+      "medium": 28,
+      "hard": 184,
+      "easy": 79
+    },
+    "avg_claim_length": 75.70103092783505
+  },
+  "description": "Adversarially harder fact verification dataset generated from fever, truthfulqa, scifact, halueval, musique, factscore using rule-based perturbation strategies."
+}

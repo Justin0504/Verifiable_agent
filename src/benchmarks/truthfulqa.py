@@ -60,23 +60,65 @@ class TruthfulQALoader(BenchmarkLoader):
                 best_answer = row.get("best_answer", "")
                 correct_answers = row.get("correct_answers", [])
                 incorrect_answers = row.get("incorrect_answers", [])
+                if not isinstance(correct_answers, list):
+                    correct_answers = [correct_answers]
+                if not isinstance(incorrect_answers, list):
+                    incorrect_answers = [incorrect_answers]
 
-                # Gold label: the question is designed so LLMs often get it wrong
-                # If an LLM matches incorrect_answers → C; matches correct → S
+                risk_type = _CATEGORY_TO_RISK.get(category, "missing_evidence")
+
+                # Sample 1: correct answer → S
                 sample = BenchmarkSample(
-                    id=f"tqa_{i:04d}",
+                    id=f"tqa_{i:04d}_S",
                     question=question,
                     reference_answer=best_answer,
-                    gold_label="S",  # best_answer is the supported truth
-                    claims=correct_answers if isinstance(correct_answers, list) else [correct_answers],
-                    evidence=[best_answer] + (correct_answers if isinstance(correct_answers, list) else []),
+                    gold_label="S",
+                    claims=correct_answers,
+                    evidence=[best_answer] + correct_answers,
                     metadata={
                         "category": category,
-                        "risk_type": _CATEGORY_TO_RISK.get(category, "missing_evidence"),
-                        "incorrect_answers": incorrect_answers,
+                        "risk_type": risk_type,
                         "source": row.get("source", ""),
                     },
                 )
+                samples.append(sample)
+
+                # Sample 2: first incorrect answer → C (hallucination)
+                if incorrect_answers:
+                    wrong = incorrect_answers[0]
+                    sample = BenchmarkSample(
+                        id=f"tqa_{i:04d}_C",
+                        question=question,
+                        reference_answer=wrong,
+                        gold_label="C",
+                        claims=[wrong],
+                        evidence=[best_answer] + correct_answers,
+                        metadata={
+                            "category": category,
+                            "risk_type": risk_type,
+                            "source": row.get("source", ""),
+                            "is_hallucination": True,
+                        },
+                    )
+                    samples.append(sample)
+
+                # Sample 3: for subjective/unanswerable categories → N
+                if risk_type == "unanswerable":
+                    sample = BenchmarkSample(
+                        id=f"tqa_{i:04d}_N",
+                        question=question,
+                        reference_answer="This question is subjective and has no single correct answer.",
+                        gold_label="N",
+                        evidence=[best_answer],
+                        metadata={
+                            "category": category,
+                            "risk_type": risk_type,
+                            "source": row.get("source", ""),
+                        },
+                    )
+
+                # Skip the normal append — already added above
+                continue
             else:  # multiple_choice
                 choices = row.get("mc1_targets", {})
                 labels = choices.get("labels", [])
@@ -140,16 +182,40 @@ class TruthfulQALoader(BenchmarkLoader):
 
         samples = []
         for i, item in enumerate(items[:limit]):
+            risk_type = _CATEGORY_TO_RISK.get(item["cat"], "missing_evidence")
+            # S: correct answer
             samples.append(BenchmarkSample(
-                id=f"tqa_{i:04d}",
+                id=f"tqa_{i:04d}_S",
                 question=item["q"],
                 reference_answer=item["a"],
                 gold_label="S",
                 evidence=[item["a"]],
                 metadata={
                     "category": item["cat"],
-                    "risk_type": _CATEGORY_TO_RISK.get(item["cat"], "missing_evidence"),
-                    "incorrect_answers": [item["wrong"]],
+                    "risk_type": risk_type,
                 },
             ))
+            # C: incorrect (hallucinated) answer
+            samples.append(BenchmarkSample(
+                id=f"tqa_{i:04d}_C",
+                question=item["q"],
+                reference_answer=item["wrong"],
+                gold_label="C",
+                evidence=[item["a"]],
+                metadata={
+                    "category": item["cat"],
+                    "risk_type": risk_type,
+                    "is_hallucination": True,
+                },
+            ))
+            # N: for subjective/unanswerable categories
+            if risk_type == "unanswerable":
+                samples.append(BenchmarkSample(
+                    id=f"tqa_{i:04d}_N",
+                    question=item["q"],
+                    reference_answer="This question is subjective and has no single correct answer.",
+                    gold_label="N",
+                    evidence=[item["a"]],
+                    metadata={"category": item["cat"], "risk_type": risk_type},
+                ))
         return samples
