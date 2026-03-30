@@ -2,16 +2,28 @@
 
 from __future__ import annotations
 
-from .anthropic_llm import AnthropicLLM
 from .base import BaseLLM, LLMResponse
-from .openai_llm import OpenAILLM
-from .vllm_llm import VLLMOpenAI
 
-_PROVIDERS = {
-    "openai": OpenAILLM,
-    "anthropic": AnthropicLLM,
-    "vllm": VLLMOpenAI,
-}
+
+def _get_providers() -> dict:
+    """Lazy-load provider classes to avoid import errors when SDKs are missing."""
+    providers = {}
+    try:
+        from .openai_llm import OpenAILLM
+        providers["openai"] = OpenAILLM
+    except ImportError:
+        pass
+    try:
+        from .anthropic_llm import AnthropicLLM
+        providers["anthropic"] = AnthropicLLM
+    except ImportError:
+        pass
+    try:
+        from .vllm_llm import VLLMOpenAI
+        providers["vllm"] = VLLMOpenAI
+    except ImportError:
+        pass
+    return providers
 
 
 def create_llm(config: dict) -> BaseLLM:
@@ -20,10 +32,14 @@ def create_llm(config: dict) -> BaseLLM:
     Expected keys: provider, model, temperature, max_tokens.
     Optional: api_base (for vllm / custom endpoints).
     """
+    providers = _get_providers()
     provider = config["provider"]
-    cls = _PROVIDERS.get(provider)
+    cls = providers.get(provider)
     if cls is None:
-        raise ValueError(f"Unknown LLM provider: {provider!r}. Choose from {list(_PROVIDERS)}")
+        raise ValueError(
+            f"Unknown or unavailable LLM provider: {provider!r}. "
+            f"Available: {list(providers)}. Install the required SDK."
+        )
 
     kwargs = {
         "model": config["model"],
@@ -35,4 +51,4 @@ def create_llm(config: dict) -> BaseLLM:
     return cls(**kwargs)
 
 
-__all__ = ["BaseLLM", "LLMResponse", "OpenAILLM", "AnthropicLLM", "VLLMOpenAI", "create_llm"]
+__all__ = ["BaseLLM", "LLMResponse", "create_llm"]
