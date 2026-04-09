@@ -1,0 +1,42 @@
+# SEVA Attribution Verification GRPO Config
+# Based on fact_verification_grpo.yaml, adapted for binary attribution task
+
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+custom_reward_function:
+  path: verl/custom_reward/attribution_reward.py
+  name: compute_score
+
+data:
+  train_files: data/attribution/grpo_train.parquet
+  val_files: data/attribution/grpo_val.parquet
+  train_batch_size: 128
+  val_batch_size: 128
+  max_prompt_length: 768
+  max_response_length: 256
+  truncation: left
+  return_raw_chat: True
+  shuffle: True
+
+actor_rollout_ref:
+  hybrid_engine: True
+  rollout:
+    name: vllm
+    gpu_memory_utilization: 0.4
+    tensor_model_parallel_size: 1
+    n: 5
+    temperature: 1.0
+    top_p: 1.0
+    multi_turn:
+      enable: False
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  norm_adv_by_std_in_grpo: true
