@@ -1,128 +1,250 @@
-# Verifiable Agent — Prompt Version
+# SEVA: Structured Evidence Verification Agent with Process Reward Optimization
 
-A three-stage pipeline for automated LLM hallucination detection and reliability evaluation, with a self-evolving feedback loop.
+**Paper**: *SEVA: Structured Evidence Verification Agents with Process Reward Optimization* (ARR 2026)
+
+SEVA is a fact attribution verification framework that produces **structured, interpretable output** --- evidence alignment, step-by-step reasoning chains, calibrated confidence, and fine-grained error diagnosis --- trained with **GRPO and a novel process reward function**.
+
+## Key Contributions
+
+1. **Structured verification output**: Instead of opaque binary labels, SEVA produces evidence alignment spans, reasoning chains, and error diagnosis with a 6-category taxonomy.
+2. **Process reward function**: Decomposes verification quality into 5 independently scored components (format, alignment, chain, label, diagnosis), creating a smooth optimization landscape for RL.
+3. **GRPO training for fact verification**: First application of GRPO to fact attribution, achieving +4.1 F1 over SFT with near-perfect structural quality.
 
 ## Architecture
 
 ```
-┌─────────────┐     ┌──────────────┐     ┌─────────────┐
-│  Proposer    │────▶│  Responder   │────▶│  Verifier   │
-│  (Stage 1)   │     │  (Stage 2)   │     │  (Stage 3)  │
-│              │     │              │     │             │
-│ Generate     │  x  │ Target LLM   │  α  │ Decompose → │
-│ safety       │────▶│ generates    │────▶│ Match     → │
-│ probes       │     │ response     │     │ Score       │
-└──────┬───────┘     └──────────────┘     └──────┬──────┘
-       │                                         │
-       │         ┌──────────────────┐            │
-       └─────────│  Self-Evolution  │◀───────────┘
-                 │  Failure → Novel │
-                 │  patterns → Πₑ₊₁ │
-                 └──────────────────┘
+Input (claim, source)
+        │
+        ▼
+┌──────────────────────┐
+│   SEVA Model         │
+│   (Qwen2.5-3B/7B)   │
+└──────────┬───────────┘
+           │
+    ┌──────┴──────┐
+    ▼             ▼
+┌────────┐  ┌──────────┐
+│Evidence│  │Reasoning │
+│Align.  │  │Chain     │
+└────────┘  └──────────┘
+    ▼             ▼
+┌────────┐  ┌──────────┐
+│Label + │  │Error     │
+│Confid. │  │Diagnosis │
+└────────┘  └──────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  Process Reward R(v) │
+│  R_f(10%) + R_a(30%) │
+│  + R_c(30%) + R_l(15%)│
+│  + R_d(15%) + R_cal  │
+└──────────┬───────────┘
+           │
+           ▼
+┌──────────────────────┐
+│  GRPO Optimization   │
+│  G=8, T=1.2          │
+└──────────────────────┘
 ```
 
-### Stage 1: Proposer
-Generates **safety probes** targeting 4 risk categories:
-- **Missing Evidence** — topics with scarce public information
-- **Multi-Hop Reasoning** — questions requiring chained factual steps
-- **Pressure/Presupposition** — questions with false or disputed premises
-- **Unanswerable** — fundamentally unanswerable questions
+## Results
 
-### Stage 2: Responder
-Queries the target model(s) under evaluation and records raw responses.
+### ClearFacts Benchmark
 
-### Stage 3: Verifier
-1. **Claim Decomposition** — breaks responses into atomic claims
-2. **Evidence Matching** — labels each claim as Supported (S), Contradicted (C), or Not Mentioned (N)
-3. **Scoring** — aggregates claim labels into a response-level reliability score
+| Model | Size | Output | F1 |
+|-------|------|--------|-----|
+| Llama-3.1 (0-shot) | 8B | binary | 67.2 |
+| MiniCheck | 7B | binary | 81.2 |
+| ClearCheck | 8B | binary | ~84 |
+| **SEVA-SFT** | **3B** | **structured** | **64.9** |
+| **SEVA-GRPO** | **3B** | **structured** | **69.0** |
 
-### Self-Evolution Loop
-Extracts informative failures (false positives, false negatives, boundary cases) and feeds them back into the Proposer for the next epoch.
+### Structural Quality (ClearFacts)
 
-## Setup
+| | Alignment | Chain | Format |
+|---|-----------|-------|--------|
+| SEVA-SFT | 0.917 | 0.917 | 72% |
+| SEVA-GRPO | **0.997** | **0.995** | **100%** |
+
+### Multi-Benchmark (Macro F1, 200 samples each)
+
+| | FEVER | TruthfulQA | SciFact | HaluEval | MusiQue | FactScore |
+|---|-------|------------|---------|----------|---------|-----------|
+| Zero-shot | 63.3 | 43.7 | 78.0 | 29.5 | 22.2 | 82.1 |
+| SFT | 76.3 | 72.1 | 59.9 | 42.0 | 22.2 | 82.1 |
+| GRPO | **84.9** | **82.7** | 22.1 | 39.4 | 22.2 | 43.5 |
+
+## Training Pipeline
+
+### Phase 1: SFT Data Generation
+Generate structured annotations using GPT-4o-mini as teacher:
+```bash
+python scripts/generate_sft_data.py \
+    --input data/attribution/anli_train.jsonl \
+    --output data/attribution/seva_sft_train.jsonl
+```
+
+### Phase 2: Supervised Fine-Tuning
+```bash
+# 3B full fine-tuning
+CUDA_VISIBLE_DEVICES=0,1 python scripts/train_seva_sft.py \
+    --base-model Qwen/Qwen2.5-3B-Instruct \
+    --train-file data/attribution/seva_sft_train.jsonl
+
+# 7B with LoRA
+CUDA_VISIBLE_DEVICES=0 python scripts/train_seva_sft.py \
+    --base-model Qwen/Qwen2.5-7B-Instruct \
+    --lora --lora-rank 64 --merge-lora
+```
+
+### Phase 3: GRPO with Process Reward
+```bash
+# Using veRL framework
+cd drzero && bash scripts/run_grpo_attribution.sh
+```
+
+The process reward is defined in `drzero/verl/custom_reward/seva_reward.py`.
+
+## Self-Evolution Loop
+
+SEVA includes a self-evolution pipeline (VERIFY -> REFLECT -> PROBE -> REFINE):
 
 ```bash
-cd Verifiable_agent
-pip install -r requirements.txt
+python scripts/run_self_evolution.py \
+    --model /path/to/checkpoint \
+    --rounds 3
 ```
 
-Set API keys as environment variables:
+| Phase | Script | Description |
+|-------|--------|-------------|
+| VERIFY | `scripts/eval_seva.py` | Evaluate on benchmarks, collect predictions |
+| REFLECT | `scripts/analyze_failures.py`, `scripts/extract_rules.py` | Build weakness profile, extract rules to ReasoningBank |
+| PROBE | `scripts/generate_adversarial_probes.py` | Generate targeted adversarial examples |
+| REFINE | `scripts/run_self_evolution.py` | Additional GRPO on hard examples + rule injection |
+
+## Evaluation
+
 ```bash
-export OPENAI_API_KEY="your-key"
-export ANTHROPIC_API_KEY="your-key"  # if using Claude
+# Evaluate on ClearFacts
+python scripts/eval_seva.py \
+    --model /path/to/checkpoint \
+    --benchmarks clearfacts
+
+# Evaluate on all benchmarks
+python scripts/eval_seva.py \
+    --model /path/to/checkpoint \
+    --all
+
+# With ReasoningBank rules
+python scripts/eval_seva.py \
+    --model /path/to/checkpoint \
+    --rules-file reasoning_bank/rules_prompt.txt
 ```
 
-## Usage
+## Process Reward Function
 
-### Run experiment
-```bash
-# Single default experiment
-python scripts/run_experiment.py --config configs/default.yaml
+The reward decomposes verification quality into 5 components:
 
-# Multi-model comparison
-python scripts/run_experiment.py --config configs/experiments/multi_model.yaml
+```
+R = 0.10*R_f + 0.30*R_a + 0.30*R_c + 0.15*R_l + 0.15*R_d + R_cal
 ```
 
-### Analyze results
-```bash
-python scripts/analyze_results.py --results results/<run_dir>/all_results.json
-```
+| Component | Weight | Description |
+|-----------|--------|-------------|
+| R_f (Format) | 0.10 | Valid JSON with required fields |
+| R_a (Alignment) | 0.30 | Evidence span extraction quality |
+| R_c (Chain) | 0.30 | Reasoning step quality |
+| R_l (Label) | 0.15 | Label accuracy |
+| R_d (Diagnosis) | 0.15 | Error type + fix suggestion |
+| R_cal | +/- | Calibration bonus/penalty |
 
-This generates:
-- **Table 1**: Hallucination rate per model per risk type (CSV)
-- **Table 2**: S/C/N distribution per model (CSV)
-- **Figure 1**: Radar chart — model reliability across risk types
-- **Figure 2**: Evolution curve — hallucination rate across epochs
-- **Figure 3**: Heatmap — contradiction rate by model × risk type
+Process components (R_f + R_a + R_c) = **70%**, Outcome components (R_l + R_d) = **30%**.
 
-### Build knowledge base
-```bash
-python scripts/build_knowledge_base.py --path knowledge_base/documents
-```
+## Error Taxonomy
 
-### Run tests
-```bash
-pytest tests/ -v
-```
+| Error Type | Description |
+|------------|-------------|
+| `numerical_exaggeration` | Number inflated/deflated |
+| `negation_flip` | Negation added/removed |
+| `scope_inflation` | Specific claim overgeneralized |
+| `temporal_shift` | Time qualifier altered |
+| `entity_substitution` | Named entity swapped |
+| `fabrication` | Information absent from source |
 
 ## Project Structure
 
 ```
-├── configs/               # Experiment configurations (YAML)
-│   ├── default.yaml
-│   ├── models/            # Per-model configs
-│   └── experiments/       # Multi-model experiment configs
 ├── src/
-│   ├── llm/               # LLM provider abstraction (OpenAI, Anthropic, vLLM)
-│   ├── proposer/          # Stage 1: safety probe generation
-│   ├── responder/         # Stage 2: target model querying
-│   ├── verifier/          # Stage 3: claim decomposition + evidence matching + scoring
-│   ├── evolution/         # Self-evolving loop (failure extraction + strategy update)
-│   ├── data/              # Pydantic data schemas
-│   └── utils/             # Logging + metrics
-├── knowledge_base/        # Pre-built evidence documents (JSONL)
-├── scripts/               # Experiment runner + analysis
-├── results/               # Output (gitignored)
-└── tests/                 # Unit tests
+│   ├── verifier/              # Core verification pipeline
+│   │   ├── seva_format.py     # Structured output schema + prompts
+│   │   ├── verifier.py        # Verification orchestrator
+│   │   ├── decomposer.py      # Claim decomposition
+│   │   ├── evidence_matcher.py # Evidence matching
+│   │   ├── scorer.py          # Reliability scoring
+│   │   └── calibration.py     # Prediction calibration
+│   ├── proposer/              # Safety probe generation
+│   ├── evolution/             # Self-evolution loop
+│   │   ├── evolver.py         # Failure analysis + strategy update
+│   │   ├── reasoning_bank.py  # Verification rule accumulation
+│   │   └── failure_extractor.py
+│   ├── baselines/             # Baseline methods (SelfCheck, CoVe, SAFE, etc.)
+│   ├── benchmarks/            # Benchmark loaders (FEVER, TruthfulQA, etc.)
+│   ├── llm/                   # LLM providers (OpenAI, Anthropic, vLLM)
+│   └── tools/                 # External tools (web search, calculator, etc.)
+├── drzero/                    # veRL-based GRPO training framework
+│   ├── verl/custom_reward/
+│   │   └── seva_reward.py     # Process reward implementation
+│   ├── config/                # Training configs
+│   └── scripts/               # Training launch scripts
+├── scripts/
+│   ├── train_seva_sft.py      # SFT training (full + LoRA)
+│   ├── eval_seva.py           # Structured evaluation
+│   ├── analyze_failures.py    # VERIFY/REFLECT phase
+│   ├── extract_rules.py       # ReasoningBank rule extraction
+│   ├── generate_adversarial_probes.py  # PROBE phase
+│   ├── run_self_evolution.py  # Full self-evolution orchestrator
+│   ├── generate_sft_data.py   # SFT data generation
+│   └── run_fair_comparison.py # Baseline comparisons
+├── configs/                   # Experiment configurations
+├── data/attribution/          # Training data (SFT + GRPO)
+├── tests/                     # Unit tests
+├── paper/arr2026/             # Paper (ACL ARR 2026)
+└── requirements.txt
 ```
 
-## Configuration
+## Setup
 
-All experiment parameters are defined in YAML config files. Key settings:
+```bash
+git clone https://github.com/Justin0504/Verifiable_agent.git
+cd Verifiable_agent
+pip install -r requirements.txt
+```
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `num_epochs` | Self-evolution epochs | 3 |
-| `num_probes_per_type` | Probes per risk category | 10 |
-| `proposer_llm` | LLM for probe generation | gpt-4o |
-| `verifier_llm` | LLM for verification | gpt-4o |
-| `responder_models` | Models to evaluate | gpt-4o, claude-sonnet, gpt-4o-mini |
-| `scoring.contradicted_weight` | Penalty for contradictions | -2.0 |
+### Requirements
+- Python >= 3.10
+- PyTorch >= 2.1
+- transformers >= 4.40
+- peft >= 0.10 (for LoRA)
+- veRL (included in `drzero/`)
 
-## Supported LLM Providers
+### Environment Variables
+```bash
+export OPENAI_API_KEY="your-key"      # For SFT data generation
+export ANTHROPIC_API_KEY="your-key"   # Optional: Claude baselines
+```
 
-| Provider | Models | Config key |
-|----------|--------|-----------|
-| OpenAI | GPT-4o, GPT-4o-mini, etc. | `openai` |
-| Anthropic | Claude Sonnet, Opus, Haiku | `anthropic` |
-| vLLM | Llama-3, Mistral, etc. | `vllm` |
+## Citation
+
+```bibtex
+@article{seva2026,
+  title={SEVA: Structured Evidence Verification Agents with Process Reward Optimization},
+  author={Anonymous},
+  journal={ARR},
+  year={2026}
+}
+```
+
+## License
+
+MIT

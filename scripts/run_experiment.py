@@ -33,6 +33,7 @@ from src.data.schema import ExperimentRecord
 from src.evolution.evolver import Evolver
 from src.evolution.failure_extractor import FailureExtractor
 from src.evolution.memory_store import MemoryStore
+from src.evolution.reasoning_bank import ReasoningBank
 from src.llm import create_llm
 from src.proposer.proposer import Proposer
 from src.responder.responder import Responder
@@ -79,9 +80,15 @@ def run_single_model(
         verifier._experiment_id = experiment_id
         verifier._model_name = model_name
 
-        # Stage 1: Generate probes
-        logger.info("Stage 1: Generating safety probes...")
-        probes = proposer.generate_all(n_per_type=n_per_type, risk_weights=risk_weights)
+        # Stage 1: Generate probes (adaptive after first epoch — R-Zero style)
+        use_adaptive = epoch > 0 and proposer.verifier_weaknesses
+        logger.info(f"Stage 1: Generating safety probes (adaptive={use_adaptive})...")
+        probes = proposer.generate_all(
+            n_per_type=n_per_type,
+            risk_weights=risk_weights,
+            adaptive=use_adaptive,
+            filter_quality=epoch > 0,  # Quality filtering after first epoch
+        )
         logger.info(f"  Generated {len(probes)} probes")
 
         # Stage 2: Collect responses
@@ -115,10 +122,15 @@ def run_single_model(
             )
             logger.info(f"  Added {len(new_strategies)} new strategies to proposer memory")
 
-            # Evolve Verifier: inject corrective few-shot examples from failures
-            logger.info("  Evolving verifier with failure corrections...")
+            # Evolve Verifier: few-shot corrections + ReasoningBank rule distillation
+            logger.info("  Evolving verifier with failure corrections + rule distillation...")
             n_corrections = verifier.evolve(failures)
-            logger.info(f"  Added {n_corrections} corrective examples to verifier")
+            logger.info(f"  Added {n_corrections} corrections/rules to verifier")
+
+            # R-Zero: update Proposer's weakness profile from Verifier
+            weaknesses, boundary_acc = verifier.get_weakness_profile()
+            proposer.update_weaknesses(weaknesses, boundary_acc)
+            logger.info(f"  Updated proposer: {len(weaknesses)} weaknesses, boundary_acc={boundary_acc:.1%}")
 
             # Calibrate Verifier: run on synthetic data, detect biases, adjust prompt
             logger.info("  Calibrating verifier on synthetic data...")
@@ -137,12 +149,17 @@ def run_single_model(
             memory.save_matcher_few_shots(verifier.matcher.few_shot_examples)
             memory.save_decomposer_few_shots(verifier.decomposer.few_shot_examples)
             memory.save_calibration_correction(verifier.matcher.calibration_correction)
+            if verifier.reasoning_bank:
+                verifier.reasoning_bank.save()
 
             # Flush tool cache
             if verifier.tools:
                 verifier.tools.flush_cache()
 
             logger.info("  Memory persisted to disk")
+            if verifier.reasoning_bank:
+                rb_stats = verifier.reasoning_bank.stats()
+                logger.info(f"  ReasoningBank: {rb_stats}")
 
         # Store epoch results
         epoch_data = {
@@ -233,7 +250,21 @@ def main() -> None:
         enabled = [t.name for t in tool_registry.tools]
         logger.info(f"External tools enabled: {enabled}")
 
-    verifier = Verifier(verifier_llm, kb, scorer, tool_registry=tool_registry, memory=memory)
+    # Initialize ReasoningBank (structured rule memory)
+    rb_path = f"{args.memory_dir}/reasoning_bank.json"
+    reasoning_bank = ReasoningBank(path=rb_path, llm=verifier_llm)
+    logger.info(f"ReasoningBank initialized: {reasoning_bank.stats()}")
+
+    # Majority vote configuration
+    majority_n = config.get("verification", {}).get("majority_vote_n", 1)
+
+    verifier = Verifier(
+        verifier_llm, kb, scorer,
+        tool_registry=tool_registry,
+        memory=memory,
+        reasoning_bank=reasoning_bank,
+        majority_vote_n=majority_n,
+    )
 
     # Load verifier with persisted few-shot corrections
     saved_matcher = memory.load_matcher_few_shots()

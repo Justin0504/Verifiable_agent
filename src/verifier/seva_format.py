@@ -50,6 +50,19 @@ it attributable
 Respond with JSON only. Be precise in span extraction."""
 
 
+def make_system_prompt_with_rules(rules_text: str = None) -> str:
+    """Create SEVA system prompt with optional ReasoningBank rules injected.
+
+    Args:
+        rules_text: Rules text from extract_rules.py's rules_prompt.txt.
+                    If None, returns the base system prompt.
+    """
+    if not rules_text or not rules_text.strip():
+        return SEVA_SYSTEM_PROMPT
+
+    return SEVA_SYSTEM_PROMPT + "\n\n" + rules_text.strip()
+
+
 SEVA_USER_TEMPLATE = """\
 Claim: {claim}
 
@@ -69,7 +82,27 @@ Your analysis must be:
 3. CONSISTENT: the reasoning chain must lead to the given gold label
 4. REALISTIC: error_type and fix_suggestion must be specific and actionable
 
-Output a single JSON object (no markdown, no explanation outside the JSON)."""
+You MUST follow this EXACT JSON schema:
+
+{
+  "evidence_alignment": [
+    {"claim_span": "exact phrase from claim", "source_span": "exact phrase from source or NOT_FOUND", "status": "match|mismatch|not_found"}
+  ],
+  "reasoning_chain": [
+    {"step": 1, "claim_part": "what you are checking", "source_evidence": "relevant source text", "judgment": "supported|not_supported|partially_supported", "explanation": "why this judgment"}
+  ],
+  "label": "Attributable or Not Attributable",
+  "confidence": 0.0-1.0,
+  "error_type": "one of: numerical_exaggeration, negation_flip, scope_inflation, temporal_shift, entity_substitution, fabrication (ONLY if Not Attributable)",
+  "fix_suggestion": "how to fix the claim (ONLY if Not Attributable)"
+}
+
+Rules:
+- evidence_alignment MUST be an array of objects, each with claim_span, source_span, status
+- reasoning_chain MUST be an array of objects, each with step, claim_part, source_evidence, judgment, explanation
+- status MUST be one of: match, mismatch, not_found
+- judgment MUST be one of: supported, not_supported, partially_supported
+- Output ONLY the JSON object. No markdown, no explanation outside the JSON."""
 
 
 TEACHER_USER_TEMPLATE = """\
@@ -79,7 +112,5 @@ Source: {source}
 
 Gold label: {label}
 
-Generate the structured analysis JSON with: evidence_alignment, reasoning_chain, \
-label, confidence, error_type (if Not Attributable), fix_suggestion (if Not Attributable).
-
-Important: the "label" field MUST be "{label}". Make the reasoning chain support this label."""
+Generate the structured analysis JSON following the exact schema. \
+The "label" field MUST be "{label}". Make the reasoning chain support this label."""

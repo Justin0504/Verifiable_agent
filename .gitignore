@@ -8,3 +8,15 @@ dist/
 build/
 .venv/
 .DS_Store
+*.zip
+checkpoints/
+*.pt
+*.bin
+*.safetensors
+wandb/
+logs/
+.claude/
+docs/~$*
+data/attribution/*.jsonl
+data/attribution/*.parquet
+data/*.jsonl

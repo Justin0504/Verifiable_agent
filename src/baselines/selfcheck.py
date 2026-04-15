@@ -83,7 +83,7 @@ class SelfCheckGPTBaseline(BaseBaseline):
 
         for i, claim in enumerate(claims):
             samples_text = "\n".join(
-                f"Response {j+1}: {resp[:500]}" for j, resp in enumerate(sampled_responses)
+                f"Response {j+1}: {resp[:300]}" for j, resp in enumerate(sampled_responses)
             )
 
             prompt = CONSISTENCY_PROMPT.format(

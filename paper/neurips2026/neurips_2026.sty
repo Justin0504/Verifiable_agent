@@ -1,0 +1,30 @@
+% NeurIPS 2026 style file (placeholder - replace with official style)
+% Based on neurips_2024.sty structure
+
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{neurips_2026}[2026/01/01 NeurIPS 2026 submission]
+
+\newif\if@neuripsfinal\@neuripsfinalfalse
+\DeclareOption{final}{\@neuripsfinaltrue}
+\DeclareOption{preprint}{}
+\ProcessOptions\relax
+
+% Page layout
+\usepackage[margin=1in]{geometry}
+\usepackage{times}
+\usepackage{natbib}
+
+% Title formatting
+\usepackage{titlesec}
+\titleformat{\section}{\large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalsize\bfseries}{\thesubsection}{1em}{}
+\titleformat{\paragraph}[runin]{\normalsize\bfseries}{}{}{}[.]
+
+% Line numbers for review (disabled in final)
+\if@neuripsfinal
+\else
+  \usepackage{lineno}
+  \linenumbers
+\fi
+
+\endinput

@@ -26,7 +26,7 @@ from sklearn.metrics import f1_score, accuracy_score, confusion_matrix
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from src.verifier.seva_format import SEVA_SYSTEM_PROMPT, SEVA_USER_TEMPLATE, ERROR_TYPES
+from src.verifier.seva_format import SEVA_SYSTEM_PROMPT, SEVA_USER_TEMPLATE, ERROR_TYPES, make_system_prompt_with_rules
 
 # Import SEVA v2 reward components for scoring
 sys.path.insert(0, str(Path(__file__).parent.parent / "drzero" / "verl" / "custom_reward"))
@@ -41,8 +41,8 @@ from seva_reward import (
 # ============================================================
 # Config
 # ============================================================
-DATA_DIR = Path("/Users/justin/Verifiable_agent/data/attribution")
-RESULTS_DIR = Path("/Users/justin/Verifiable_agent/results/seva_eval")
+DATA_DIR = Path(os.environ.get("DATA_DIR", "/home/yinian/verifiable_agent/data/attribution"))
+RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", "/home/yinian/verifiable_agent/results/seva_eval"))
 
 
 # ============================================================
@@ -63,10 +63,12 @@ def load_model(model_path: str):
 
 
 def generate_response(model, tokenizer, claim: str, source: str,
-                      max_new_tokens: int = 512) -> str:
+                      max_new_tokens: int = 512,
+                      rules_text: str = None) -> str:
     """Generate SEVA v2 structured verification response."""
+    system_prompt = make_system_prompt_with_rules(rules_text)
     messages = [
-        {"role": "system", "content": SEVA_SYSTEM_PROMPT},
+        {"role": "system", "content": system_prompt},
         {"role": "user", "content": SEVA_USER_TEMPLATE.format(
             claim=claim, source=source[:2000]
         )},
@@ -197,7 +199,8 @@ def load_benchmark(name: str) -> list:
 
 
 def evaluate_benchmark(model, tokenizer, samples: list,
-                       benchmark_name: str) -> dict:
+                       benchmark_name: str,
+                       rules_text: str = None) -> dict:
     """Run SEVA v2 evaluation with structured output metrics."""
     print(f"\nEvaluating on {benchmark_name} ({len(samples)} samples)...")
 
@@ -217,7 +220,8 @@ def evaluate_benchmark(model, tokenizer, samples: list,
         if not claim or not source:
             continue
 
-        response = generate_response(model, tokenizer, claim, source)
+        response = generate_response(model, tokenizer, claim, source,
+                                     rules_text=rules_text)
         parsed = extract_json_from_response(response)
 
         if parsed is None:
@@ -335,7 +339,16 @@ def main():
     parser.add_argument("--all", action="store_true")
     parser.add_argument("--max-samples", type=int, default=None)
     parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument("--rules-file", type=str, default=None,
+                        help="ReasoningBank rules_prompt.txt for rule injection")
     args = parser.parse_args()
+
+    # Load rules if provided
+    rules_text = None
+    if args.rules_file and Path(args.rules_file).exists():
+        with open(args.rules_file) as f:
+            rules_text = f.read()
+        print(f"Loaded rules from: {args.rules_file}")
 
     model_name = Path(args.model).name
     output_dir = Path(args.output_dir) if args.output_dir else RESULTS_DIR / model_name
@@ -357,7 +370,8 @@ def main():
         if args.max_samples:
             samples = samples[:args.max_samples]
 
-        results = evaluate_benchmark(model, tokenizer, samples, bench_name)
+        results = evaluate_benchmark(model, tokenizer, samples, bench_name,
+                                     rules_text=rules_text)
         all_results[bench_name] = results
 
         with open(output_dir / f"{bench_name}_results.json", "w") as f:

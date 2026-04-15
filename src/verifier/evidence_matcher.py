@@ -7,66 +7,76 @@ import json
 from src.data.schema import AtomicClaim, ClaimLabel
 from src.llm.base import BaseLLM
 
-MATCHER_SYSTEM = """\
-You are a factual verification engine. Given a claim and supporting evidence \
-documents, determine whether the claim is:
+MATCHER_SYSTEM_CLEAN = ""  # No system prompt at epoch 0 — matches direct prompting
 
-- **Supported (S)**: The evidence directly or strongly supports this claim.
-- **Contradicted (C)**: The evidence directly contradicts this claim.
-- **Not Mentioned (N)**: The evidence neither supports nor contradicts; insufficient info.
+MATCHER_SYSTEM_COT = """\
+You are a factual verification engine. Given a claim and evidence, determine:
+- "S" (Supported): The evidence directly supports this claim
+- "C" (Contradicted): The evidence directly contradicts this claim
+- "N" (Not enough info): Insufficient evidence to verify
 
-You must be precise:
-- A claim is Supported ONLY if the evidence clearly backs it up
-- A claim is Contradicted ONLY if the evidence explicitly conflicts with it
-- When in doubt, label as Not Mentioned
+Think step by step:
+1. Identify key assertions in the claim (names, numbers, dates, relationships)
+2. Find specific sentences in the evidence relevant to these assertions
+3. Compare each assertion against the evidence
+4. Assign the final label
 
-You MUST reason step by step before giving a final verdict. Follow these steps:
-
-Step 1 — EXTRACT: Identify the key factual assertions in the claim \
-(names, numbers, dates, relationships).
-Step 2 — RETRIEVE: Find the specific sentences in the evidence that are \
-relevant to these assertions. Quote them exactly.
-Step 3 — COMPARE: For each assertion, compare it against the retrieved \
-evidence. Note whether it matches, conflicts, or has no corresponding evidence.
-Step 4 — JUDGE: Based on the comparison, assign the final label.
-
-Output format: Return a JSON object with:
-- "step1_extract": key assertions from the claim
-- "step2_retrieve": relevant evidence quotes
-- "step3_compare": comparison of each assertion vs evidence
-- "label": one of "S", "C", "N"
-- "confidence": float between 0.0 and 1.0
-- "evidence_snippet": the specific part of evidence that supports your judgment
-- "reasoning": brief explanation of your verdict
+Reply with JSON: {"label": "S"/"C"/"N", "confidence": <float 0-1>, "reasoning": "<brief>", "evidence_snippet": "<key quote>"}
 """
 
-MATCHER_PROMPT = """\
+MATCHER_PROMPT_CLEAN = """\
+Given the following claim and evidence, determine if the claim is:
+- "S" (Supported): The evidence supports this claim
+- "C" (Contradicted): The evidence contradicts this claim
+- "N" (Not enough info): The evidence is insufficient to verify
+
 Claim: {claim}
 
 Evidence:
 {evidence}
 
-Verify the claim against the evidence above. Think step by step.
+Reply with JSON: {{"label": "S"/"C"/"N", "confidence": <float 0-1>, "reasoning": "<brief>"}}
+"""
+
+MATCHER_PROMPT_EVOLVED = """\
+Claim: {claim}
+
+Evidence:
+{evidence}
+
+Verify the claim against the evidence. Reply with JSON: {{"label": "S"/"C"/"N", "confidence": <float 0-1>, "reasoning": "<brief>"}}
 """
 
 
 class EvidenceMatcher:
     """Match atomic claims against evidence and assign S/C/N labels.
 
-    Supports self-evolution: accumulated few-shot examples from past
-    verification failures improve labeling accuracy across epochs.
+    Supports self-evolution via prompt refinement:
+    - Epoch 0: clean prompt (matches direct prompting performance)
+    - Epoch 1+: refined system prompt based on error analysis
     """
 
     def __init__(self, llm: BaseLLM):
         self.llm = llm
         self.few_shot_examples: list[dict] = []
         self.calibration_correction: str = ""
+        self.evolved_prompt: str = ""  # Refined prompt from evolution (replaces base)
+        self.epoch: int = 0
 
     def match(self, claim: AtomicClaim, evidence: str) -> AtomicClaim:
         """Verify a single claim against evidence, returning an updated claim."""
-        prompt = MATCHER_PROMPT.format(claim=claim.text, evidence=evidence)
         system = self._build_system_prompt()
-        result = self.llm.generate(prompt, system=system)
+
+        # Epoch 0: use clean prompt (all-in-one, no system), matches direct prompting
+        if not system:
+            prompt = MATCHER_PROMPT_CLEAN.format(claim=claim.text, evidence=evidence)
+        else:
+            prompt = MATCHER_PROMPT_EVOLVED.format(claim=claim.text, evidence=evidence)
+            # Inject per-claim ReasoningBank rules if available
+            if claim.metadata and claim.metadata.get("reasoning_rules"):
+                system += "\n" + claim.metadata["reasoning_rules"]
+
+        result = self.llm.generate(prompt, system=system if system else None)
         return self._parse_verdict(claim, result.text)
 
     def match_batch(
@@ -86,27 +96,36 @@ class EvidenceMatcher:
             self.few_shot_examples = self.few_shot_examples[-15:]
 
     def _build_system_prompt(self) -> str:
-        """Build system prompt with three layers of evolution context:
-        1. Base rules (static)
-        2. Calibration corrections (from synthetic data accuracy measurement)
-        3. Few-shot corrections (from past failure cases)
+        """Build system prompt using prompt refinement strategy.
+
+        Epoch 0: Clean, simple prompt (match direct prompting baseline)
+        Epoch 1+: Use evolved prompt if available, otherwise CoT prompt + corrections
         """
-        prompt = MATCHER_SYSTEM
+        # If we have an evolved prompt from self-refinement, use it directly
+        if self.evolved_prompt:
+            return self.evolved_prompt
 
-        # Layer 2: Calibration-based bias corrections
+        # Epoch 0: clean prompt, no extras — matches direct prompting
+        if self.epoch == 0 or (not self.few_shot_examples and not self.calibration_correction):
+            return MATCHER_SYSTEM_CLEAN
+
+        # Later epochs without evolved prompt: CoT + targeted corrections
+        prompt = MATCHER_SYSTEM_COT
+
+        # Add calibration bias note (one line, not verbose)
         if self.calibration_correction:
-            prompt += self.calibration_correction
+            prompt += "\n" + self.calibration_correction
 
-        # Layer 3: Few-shot corrections from past failures
+        # Add only the 3 most recent, most specific corrections
         if self.few_shot_examples:
-            prompt += "\n\nLearn from these past verification errors to avoid repeating them:\n"
-            for i, ex in enumerate(self.few_shot_examples, 1):
+            recent = self.few_shot_examples[-3:]
+            prompt += "\n\nCommon mistakes to avoid:\n"
+            for ex in recent:
                 prompt += (
-                    f"\nCorrection {i}:\n"
-                    f"  Claim: {ex.get('claim', '')}\n"
-                    f"  Evidence: {ex.get('evidence', '')[:200]}\n"
-                    f"  Wrong label: {ex.get('wrong_label', '?')} → Correct label: {ex.get('correct_label', '?')}\n"
-                    f"  Lesson: {ex.get('reasoning', '')}\n"
+                    f"- Claim like \"{ex.get('claim', '')[:80]}\" "
+                    f"was wrongly labeled {ex.get('wrong_label', '?')}, "
+                    f"correct is {ex.get('correct_label', '?')}: "
+                    f"{ex.get('reasoning', '')[:100]}\n"
                 )
 
         return prompt

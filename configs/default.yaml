@@ -53,6 +53,18 @@ tools:
   semantic_scholar: true   # Academic paper search and citation verification
   web_search: true         # Web search for additional evidence
 
+# Verification settings
+verification:
+  majority_vote_n: 1       # 1 = single pass, 3 = triple majority vote (R-Zero)
+  reasoning_bank: true     # Enable ReasoningBank structured rule memory
+
+# Self-evolution settings (paper-inspired)
+evolution:
+  adaptive_proposer: true  # R-Zero: target Verifier's ability boundary
+  quality_filter: true     # Self-Challenging: LLM quality filtering on probes
+  rule_distillation: true  # ReasoningBank: distill rules from failure trajectories
+  max_rules: 100           # Max rules in ReasoningBank before eviction
+
 # Risk type distribution weights for probe generation
 risk_weights:
   missing_evidence: 0.25
