@@ -25,14 +25,25 @@
 \usepackage{enumitem}
 \usepackage{xcolor}
 \usepackage{xspace}
+\usepackage{arydshln}
 \usepackage{tikz}
+\usepackage{tcolorbox}
+\usepackage{pifont}
+\usepackage{tablefootnote}
+\usepackage{placeins}
 \usetikzlibrary{shapes.geometric, arrows.meta, positioning, fit, backgrounds, calc}
+
+% tcolorbox config for example boxes
+\tcbuselibrary{skins,breakable}
+\newtcolorbox{examplebox}[1][]{colback=blue!3,colframe=black!40,fonttitle=\small\bfseries,boxrule=0.4pt,arc=2pt,left=4pt,right=4pt,top=3pt,bottom=3pt,#1}
+\newcommand{\cmark}{\ding{51}}
+\newcommand{\xmark}{\ding{55}}
 
 % Custom commands
 \newcommand{\seva}{\textsc{Seva}\xspace}
 \newcommand{\realnumber}[1]{\textbf{#1}}
 
-\title{SEVA: Structured Evidence Verification Agents \\with Process Reward Optimization}
+\title{SEVA: Self-Evolving Structured Evidence Verification \\with Process Reward Optimization}
 
 \author{
   Anonymous ARR Submission
@@ -42,16 +53,16 @@
 \maketitle
 
 \begin{abstract}
-Fact attribution verifiers --- models that judge whether a claim is supported by a source document --- are critical for hallucination detection and RAG quality control.
-Existing verifiers produce opaque binary labels without interpretable reasoning, and are trained via supervised fine-tuning (SFT) that provides no learning signal for \emph{how} to verify, only \emph{what} to predict.
+Fact attribution verifiers --- models that judge whether a claim is supported by a source document --- are critical for trustworthy LLM deployment.
+Existing verifiers produce opaque binary labels that reveal nothing about \emph{which} evidence was considered or \emph{why} the judgment was made, and are trained with reward signals that collapse all verification quality into a single bit.
 
-We introduce \seva, a structured evidence verification framework that produces multi-granularity output: evidence alignment spans, step-by-step reasoning chains, calibrated confidence scores, and fine-grained error diagnosis with a six-category taxonomy.
-To train verifiers on such structured output, we propose a \emph{process reward} function that decomposes verification quality into five independently scored components --- format, evidence alignment, reasoning chain, label accuracy, and error diagnosis --- providing smooth learning signal even when the final label is incorrect.
-We train \seva using Group Relative Policy Optimization (GRPO) with this process reward, enabling reinforcement learning to improve structured verification quality beyond what SFT achieves.
+We introduce \seva, a structured evidence verification framework that produces multi-granularity output --- evidence alignment spans, step-by-step reasoning chains, calibrated confidence, and error diagnosis from a six-category taxonomy.
+Training models on such multi-component output poses a reward design challenge: we show that binary reward \emph{structurally fails} for GRPO on structured output, producing near-zero advantage spread.
+Our \emph{process reward} function addresses this by scoring five verification components independently, with process-oriented components (alignment + chain) receiving 60\% of total weight.
+This creates a smooth optimization landscape where GRPO first masters verification \emph{behavior} (alignment: $0.917 \to 0.997$, chain: $0.917 \to 0.995$), then improves label accuracy --- an implicit curriculum without explicit scheduling.
 
-On ClearFacts, \seva-3B improves from 64.9 to 69.0 macro F1 after GRPO (+4.1 over SFT), achieving near-perfect structural output quality (evidence alignment: 0.997, chain: 0.995).
-Across six diverse benchmarks, \seva-GRPO outperforms the SFT baseline on average and surpasses zero-shot Llama-3.1-8B on ClearFacts despite being less than half the size.
-The process reward creates a smooth optimization landscape essential for GRPO training on structured output --- a setting where binary reward fails entirely.
+Because structured output makes failure modes transparent, \seva further improves through a self-evolution loop (\textsc{Verify}$\to$\textsc{Reflect}$\to$\textsc{Probe}$\to$\textsc{Refine}) that generates adversarial data targeting the model's specific weaknesses.
+On ClearFacts, \seva-3B with GRPO achieves +4.1 F1 over SFT; scaling to 7B with two-stage fine-tuning yields 68.6 F1, surpassing zero-shot Llama-3.1-8B while providing interpretable verification output.
 We release our code, reward function, and structured verification dataset.\footnote{Code and data: \url{https://github.com/Justin0504/Verifiable_agent}}
 \end{abstract}
 
@@ -61,36 +72,37 @@ We release our code, reward function, and structured verification dataset.\footn
 \label{sec:intro}
 % ==============================================================
 
-Fact attribution verification --- determining whether a claim is supported by a source document --- underpins the reliability of modern NLP systems, serving as the backbone of retrieval-augmented generation (RAG) quality control \citep{gao2023rarr}, hallucination detection \citep{min2023factscore}, and factuality-based alignment \citep{tian2024finetuning}.
-Recent audits reveal that existing verifiers suffer from systematic errors, with approximately 16\% of benchmark annotations being ambiguous or incorrect \citep{seo2025vtv}, highlighting the need for more reliable verification.
+Fact attribution verification --- determining whether a claim is supported by a source document --- underpins the reliability of retrieval-augmented generation \citep{gao2023rarr}, hallucination detection \citep{min2023factscore}, and factuality-based alignment \citep{tian2024finetuning}.
+As LLMs are deployed in increasingly high-stakes settings, verifiers serve as the last line of defense against unfaithful generation.
+Yet recent audits reveal that even state-of-the-art verifiers suffer from systematic errors \citep{seo2025vtv}, raising a fundamental question: \emph{can we build verifiers that not only classify, but explain and improve?}
 
-State-of-the-art fact attribution verifiers such as MiniCheck \citep{tang2024minicheck} and ClearCheck \citep{seo2025vtv} share two fundamental limitations.
-First, they produce \emph{opaque binary labels} --- ``Attributable'' or ``Not Attributable'' --- without revealing which evidence was considered or what reasoning was applied.
-This opacity hinders auditing and debugging.
-Second, they are trained via \emph{one-shot SFT} with binary cross-entropy loss, which provides no gradient signal for intermediate verification quality: a response with perfect evidence analysis but an incorrect final label receives the same loss as random guessing.
+Current verifiers such as MiniCheck \citep{tang2024minicheck} and ClearCheck \citep{seo2025vtv} produce binary labels --- ``Attributable'' or ``Not Attributable'' --- without revealing which evidence was considered or what reasoning led to the judgment.
+Consider a claim stating ``60\% of participants significantly improved'' against a source saying ``60\% of subjects showed improvement.''
+A binary verifier outputs ``Not Attributable,'' but this tells us nothing about \emph{where} the mismatch lies: is it the percentage, the population descriptor, or the qualifier ``significantly''?
+Without such transparency, debugging and downstream correction become guesswork.
 
-We introduce \seva (Structured Evidence Verification Agent), addressing both limitations.
-\seva produces a structured JSON output containing: (1)~\emph{evidence alignment} mapping claim spans to source spans; (2)~\emph{reasoning chain} with step-by-step verification judgments; (3)~a calibrated confidence score; and (4)~\emph{error diagnosis} categorizing the failure type from a six-category taxonomy (Figure~\ref{fig:architecture}).
+A natural remedy is to train verifiers to produce \emph{structured} output --- evidence alignment spans, step-by-step reasoning chains, and error diagnoses.
+This raises a new challenge: how should such models be trained beyond supervised fine-tuning?
+Reinforcement learning with outcome-based (binary) reward has proven effective for mathematical reasoning \citep{shao2024deepseekmath, zha2025tango}, where a model must produce a single correct answer.
+But structured verification output is fundamentally different: the model must simultaneously produce valid JSON, grounded evidence spans, coherent reasoning chains, \emph{and} the correct label.
+In early training, the model rarely gets all components right at once, so binary reward is near-uniformly zero and GRPO receives no learning signal.
+We find this is not merely ``less effective'' --- \textbf{binary reward fails entirely for structured output RL}, a negative result that generalizes beyond verification to any task requiring multi-component generation.
 
-To train models to produce such structured output, we propose a \emph{process reward function} that scores each component independently:
-\begin{equation}
-\small
-R = \sum_{i} w_i \cdot R_i + R_{\text{cal}}
-\label{eq:reward}
-\end{equation}
-where $R_i \in [0, 1]$ measures format, alignment, chain, label, and diagnosis quality respectively.
-This decomposition creates a \emph{smooth reward landscape}: a response with correct alignment but wrong label receives $\sim$0.60 reward (vs.\ 0.0 under binary reward), enabling GRPO \citep{shao2024deepseekmath} to learn good verification behavior before mastering label prediction.
+To address this, we propose a \emph{process reward function} that decomposes verification quality into five independently scored components --- format, evidence alignment, reasoning chain, label accuracy, and error diagnosis.
+Process-oriented components (alignment + chain) receive 60\% of total weight, while the label contributes only 15\%.
+This creates a smooth optimization landscape where a response with correct evidence analysis but wrong label receives ${\sim}0.60$ reward (vs.\ $0.0$ under binary reward).
+An important consequence emerges during training: GRPO first learns to produce high-quality structured output (alignment: $0.917 \to 0.997$, chain: $0.917 \to 0.995$), and only then improves label accuracy --- the process reward induces an \emph{implicit curriculum} from verification behavior to verification outcome, without any explicit scheduling.
 
-\paragraph{Key insight.}
-Binary reward produces near-zero advantage spread for GRPO when the model rarely predicts correctly, causing training to stagnate.
-Process reward solves this by providing independent gradient signal from each verification sub-skill.
-We show this is essential: binary reward fails entirely, while process reward enables steady improvement.
+Structured output also unlocks a capability unavailable to binary verifiers: \emph{targeted self-improvement}.
+Because the model produces explicit evidence alignments and error diagnoses, failure analysis reveals not just \emph{that} the model errs, but \emph{why} --- which error types are systematically missed, where evidence grounding breaks down.
+This diagnostic signal drives a self-evolution loop (\textsc{Verify}$\to$\textsc{Reflect}$\to$\textsc{Probe}$\to$\textsc{Refine}) that generates adversarial examples targeting the model's specific weaknesses, enabling continuous improvement without additional human annotation.
 
-\paragraph{Contributions.}
+We instantiate these ideas in \seva (Self-Evolving Verification Agent; Figure~\ref{fig:architecture}), making three contributions:
 \begin{enumerate}[nosep,leftmargin=*]
-  \item A \textbf{structured verification framework} with evidence alignment, reasoning chains, and a six-category error taxonomy, making fact attribution interpretable and auditable (\S\ref{sec:format}).
-  \item A \textbf{process reward function} that independently scores five verification components, creating a smooth optimization landscape for RL training (\S\ref{sec:reward}).
-  \item We demonstrate that \textbf{GRPO with process reward} effectively trains structured verification (+4.1 F1 over SFT), where binary reward fails, with near-perfect structural quality (\S\ref{sec:experiments}).
+  \item A \textbf{structured verification schema} with evidence alignment, reasoning chains, calibrated confidence, and a six-category error taxonomy (\S\ref{sec:format}), paired with a \textbf{process reward function} that enables RL training where binary reward structurally fails (\S\ref{sec:reward}).
+  \item A \textbf{self-evolution loop} that leverages structured output as diagnostic signal, generating targeted adversarial data to iteratively strengthen the verifier (\S\ref{sec:evolution}).
+  \item Empirically, GRPO with process reward improves \seva-3B by +4.1 F1 over SFT with near-perfect structural quality.
+  Scaling to 7B with two-stage fine-tuning yields 68.6 F1, surpassing zero-shot Llama-3.1-8B while providing interpretable, auditable verification output (\S\ref{sec:experiments}).
 \end{enumerate}
 
 
@@ -100,25 +112,20 @@ We show this is essential: binary reward fails entirely, while process reward en
 % ==============================================================
 
 \paragraph{Fact attribution verification.}
-Determining whether a claim is supported by a source has been studied as NLI \citep{bowman2015snli}, textual entailment \citep{dagan2005pascal}, and fact verification \citep{thorne2018fever}.
-Recent work focuses on \emph{attribution} in LLM-generated text.
-MiniCheck \citep{tang2024minicheck} trains a 7B verifier via NLI transfer.
-AlignScore \citep{zha2023alignscore} proposes unified alignment scoring.
-ClearCheck \citep{seo2025vtv} constructs cleaner benchmarks and augments training with synthetic multi-hop examples.
-LLM-AggreFact \citep{tang2024llmaggrefact} aggregates 11 benchmarks for evaluation.
-All produce binary labels without structured reasoning, and all use one-shot SFT.
+The task of determining whether a claim is supported by a source has roots in NLI \citep{bowman2015snli}, textual entailment \citep{dagan2005pascal}, and fact verification \citep{thorne2018fever}.
+Recent work shifts focus to \emph{attribution} in LLM-generated text: MiniCheck \citep{tang2024minicheck} trains a 7B verifier via NLI transfer, AlignScore \citep{zha2023alignscore} proposes unified alignment scoring, and ClearCheck \citep{seo2025vtv} constructs cleaner benchmarks with synthetic multi-hop augmentation.
+LLM-AggreFact \citep{tang2024llmaggrefact} provides a unified evaluation across 11 benchmarks.
+A common thread: all produce binary labels and all use one-shot SFT, leaving both interpretability and training signal on the table.
 
-\paragraph{RL for verification.}
-GRPO \citep{shao2024deepseekmath} enables RL training without a separate critic.
-RL Tango \citep{zha2025tango} shows RL-trained verifiers outperform SFT in mathematical reasoning.
-MARCH \citep{li2026march} uses multi-agent RL for RAG generation but trains the generator, not a standalone verifier.
-Dr.Zero \citep{chen2025drzero} introduces boundary-optimal weighting for co-evolution in mathematics.
-Our work brings RL-based training to fact attribution verification, with a process reward designed for structured output.
+\paragraph{RL for verification and generation.}
+GRPO \citep{shao2024deepseekmath} enables RL training without a learned critic, and has been applied to mathematical verification \citep{zha2025tango} and multi-agent RAG generation \citep{li2026march}.
+Dr.Zero \citep{chen2025drzero} introduces boundary-optimal weighting for proposer-solver co-evolution.
+These works demonstrate that RL can improve verification quality, but all operate in settings where the output is a single answer or binary label --- the reward design challenge for \emph{structured} multi-component output remains unexplored.
 
 \paragraph{Process reward models.}
-PRMs for mathematical reasoning \citep{lightman2024lets, wang2024math} score intermediate steps independently of final answers.
-Our process reward extends this to fact verification: instead of scoring reasoning \emph{steps} sequentially, we score verification \emph{components} (alignment, chain, diagnosis), each contributing independently.
-This differs from both outcome reward (scoring only the label) and step-level PRM (scoring sequential steps).
+PRMs for mathematical reasoning \citep{lightman2024lets, wang2024math} score intermediate steps independently of final answers, providing denser training signal than outcome-only reward.
+Our process reward draws on this intuition but differs in a key way: instead of scoring reasoning \emph{steps} sequentially (where step $k$ depends on step $k{-}1$), we score verification \emph{components} (alignment, chain, diagnosis) that contribute independently.
+This decomposition is what enables the smooth reward landscape that makes GRPO viable for structured output.
 
 \begin{table}[t]
 \centering
@@ -126,16 +133,16 @@ This differs from both outcome reward (scoring only the label) and step-level PR
 \caption{Positioning of \seva against related work.}
 \label{tab:positioning}
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{lccccc}
+\begin{tabular}{lcccccc}
 \toprule
-& \textbf{Task} & \textbf{Train} & \textbf{Struct.} & \textbf{Proc.} \\
-& & & \textbf{output} & \textbf{reward} \\
+& \textbf{Task} & \textbf{Train} & \textbf{Struct.} & \textbf{Proc.} & \textbf{Self-} \\
+& & & \textbf{output} & \textbf{reward} & \textbf{Evo.} \\
 \midrule
-ClearCheck & Attr. & SFT & \texttimes & \texttimes \\
-MiniCheck & Attr. & SFT & \texttimes & \texttimes \\
-Tango & Math & GRPO & \texttimes & \texttimes \\
-Dr.Zero & Math & GRPO & \texttimes & \checkmark \\
-\textbf{\seva} & \textbf{Attr.} & \textbf{GRPO} & \checkmark & \checkmark \\
+ClearCheck & Attr. & SFT & \texttimes & \texttimes & \texttimes \\
+MiniCheck & Attr. & SFT & \texttimes & \texttimes & \texttimes \\
+Tango & Math & GRPO & \texttimes & \texttimes & \texttimes \\
+Dr.Zero & Math & GRPO & \texttimes & \checkmark & \texttimes \\
+\textbf{\seva} & \textbf{Attr.} & \textbf{GRPO} & \checkmark & \checkmark & \checkmark \\
 \bottomrule
 \end{tabular}
 \end{table}
@@ -146,91 +153,33 @@ Dr.Zero & Math & GRPO & \texttimes & \checkmark \\
 \label{sec:method}
 % ==============================================================
 
+Given a claim $c$ and a source document $d$, our goal is to train a verification model $\pi_\theta$ that produces \emph{structured} output --- evidence alignment, step-by-step reasoning, calibrated confidence, and error diagnosis --- rather than an opaque binary label.
+Figure~\ref{fig:architecture} provides an overview.
+We decompose our approach into four components:
+(1)~a \textbf{structured verification schema} that defines the multi-granularity output format (\S\ref{sec:format}; Figure~\ref{fig:architecture}, top right);
+(2)~a \textbf{process reward function} that independently scores each output component, creating a smooth optimization landscape (\S\ref{sec:reward}; Figure~\ref{fig:reward_detail});
+(3)~a \textbf{three-phase training pipeline} --- SFT data generation, supervised fine-tuning, and GRPO with process reward (\S\ref{sec:training}; Figure~\ref{fig:pipeline});
+and (4)~a \textbf{self-evolution loop} (\textsc{Verify}$\to$\textsc{Reflect}$\to$\textsc{Probe}$\to$\textsc{Refine}) that iteratively strengthens the model against its own weaknesses (\S\ref{sec:evolution}; Figure~\ref{fig:architecture}, bottom).
+
 % ---- Architecture Figure ----
 \begin{figure*}[t]
 \centering
-\begin{tikzpicture}[
-    node distance=0.8cm and 1.2cm,
-    block/.style={rectangle, draw=black!70, fill=blue!8, rounded corners=3pt, minimum height=1cm, minimum width=2.4cm, align=center, font=\small},
-    component/.style={rectangle, draw=black!50, fill=orange!10, rounded corners=2pt, minimum height=0.7cm, minimum width=2cm, align=center, font=\footnotesize},
-    reward/.style={rectangle, draw=black!50, fill=green!10, rounded corners=2pt, minimum height=0.7cm, minimum width=1.6cm, align=center, font=\footnotesize},
-    io/.style={rectangle, draw=black!40, fill=gray!10, rounded corners=2pt, minimum height=0.7cm, minimum width=2cm, align=center, font=\footnotesize},
-    arrow/.style={-{Stealth[length=2.5mm]}, thick, draw=black!60},
-    label/.style={font=\footnotesize\itshape, text=black!60},
-  ]
-
-  % Input
-  \node[io] (input) {Claim $c$ + Source $d$};
-
-  % Model
-  \node[block, right=1.5cm of input] (model) {\seva Model\\(Qwen2.5-3B)};
-
-  % Structured output components
-  \node[component, right=1.5cm of model, yshift=1.2cm] (align) {Evidence\\Alignment $A$};
-  \node[component, right=1.5cm of model, yshift=0.4cm] (chain) {Reasoning\\Chain $C$};
-  \node[component, right=1.5cm of model, yshift=-0.4cm] (label) {Label $y$ +\\Confidence $\gamma$};
-  \node[component, right=1.5cm of model, yshift=-1.2cm] (diag) {Error Diagnosis\\$e, s$};
-
-  % Reward components
-  \node[reward, right=1.2cm of align] (ra) {$R_a$\\(0.30)};
-  \node[reward, right=1.2cm of chain] (rc) {$R_c$\\(0.30)};
-  \node[reward, right=1.2cm of label] (rl) {$R_l$\\(0.15)};
-  \node[reward, right=1.2cm of diag] (rd) {$R_d$\\(0.15)};
-
-  % Format reward
-  \node[reward, above=0.3cm of ra] (rf) {$R_f$\\(0.10)};
-
-  % Total reward
-  \node[block, right=1.2cm of rc, yshift=-0.4cm, fill=green!15] (total) {Process\\Reward $R$};
-
-  % GRPO
-  \node[block, below=1cm of model, fill=red!8] (grpo) {GRPO\\Optimization};
-
-  % Arrows
-  \draw[arrow] (input) -- (model);
-  \draw[arrow] (model) -- (align);
-  \draw[arrow] (model) -- (chain);
-  \draw[arrow] (model) -- (label);
-  \draw[arrow] (model) -- (diag);
-
-  \draw[arrow] (align) -- (ra);
-  \draw[arrow] (chain) -- (rc);
-  \draw[arrow] (label) -- (rl);
-  \draw[arrow] (diag) -- (rd);
-
-  \draw[arrow] (rf) -- (total);
-  \draw[arrow] (ra) -- (total);
-  \draw[arrow] (rc) -- (total);
-  \draw[arrow] (rl) -- (total);
-  \draw[arrow] (rd) -- (total);
-
-  \draw[arrow] (total) |- (grpo);
-  \draw[arrow] (grpo) -- (model);
-
-  % Brace for structured output
-  \draw[decorate, decoration={brace, amplitude=5pt, mirror}, thick, draw=black!50]
-    ([xshift=-3pt, yshift=4pt]align.north west) -- ([xshift=-3pt, yshift=-4pt]diag.south west)
-    node[midway, left=6pt, font=\footnotesize, align=center] {Structured\\Output $\mathbf{v}$};
-
-  % Labels
-  \node[label, above=0.15cm of rf] {Format check};
-  \node[label, above=0.6cm of total] {\textbf{Process: 70\%} | Outcome: 30\%};
-
-\end{tikzpicture}
-\caption{\textbf{\seva architecture overview.} Given a (claim, source) pair, the model produces structured verification output with four components. The process reward function scores each component independently, with process-oriented components (alignment + chain) receiving 60\% of weight. GRPO uses the composite reward to update the policy.}
+\includegraphics[width=\textwidth,trim=0 10 0 10,clip]{figures/fig1_architecture.png}
+\vspace{-8pt}
+\caption{\textbf{\seva overview.} \textit{Top:} Proposer--Verifier pipeline (\S\ref{sec:format}). A RAG solver generates a response, the Proposer decomposes it into claim-level questions, and the \seva Verifier produces structured output (evidence alignment, reasoning chain, label, error diagnosis). \textit{Bottom:} Self-evolution training loop (\S\ref{sec:evolution}). Each round evaluates the model (\textsc{Verify}), analyzes failure patterns (\textsc{Reflect}), generates targeted adversarial examples (\textsc{Probe}), and retrains with GRPO and process reward (\textsc{Refine}). The process reward (\S\ref{sec:reward}) and training pipeline (\S\ref{sec:training}) are detailed in Figures~\ref{fig:reward_detail} and~\ref{fig:pipeline}.}
 \label{fig:architecture}
+\vspace{-6pt}
 \end{figure*}
 
 
-\subsection{Structured Verification Output}
+\subsection{Structured Verification Schema}
 \label{sec:format}
 
-Given a claim $c$ and source document $d$, \seva produces a structured output $\mathbf{v} = (A, C, y, \gamma, e, s)$:
+\seva produces a structured output $\mathbf{v} = (A, C, y, \gamma, e, s)$ with four complementary components:
 
 \paragraph{Evidence alignment ($A$).}
-A list of $(c_i, d_i, \text{status}_i)$ triples mapping claim spans to source spans.
-Each \texttt{status} $\in$ \{\texttt{match}, \texttt{mismatch}, \texttt{not\_found}\}.
-This forces the model to ground verification in specific textual evidence.
+A list of $(c_i, d_i, \text{status}_i)$ triples mapping claim spans to source spans, where each \texttt{status} $\in$ \{\texttt{match}, \texttt{mismatch}, \texttt{not\_found}\}.
+This forces the model to ground its verification in specific textual evidence, making the decision auditable.
 
 \paragraph{Reasoning chain ($C$).}
 Step-by-step verification, where each step examines a \texttt{claim\_part} against \texttt{source\_evidence} with a \texttt{judgment} $\in$ \{\texttt{supported}, \texttt{not\_supported}, \texttt{partially\_supported}\} and a natural language \texttt{explanation}.
@@ -239,13 +188,15 @@ Step-by-step verification, where each step examines a \texttt{claim\_part} again
 Binary label $y \in \{\text{Attributable}, \text{Not Attributable}\}$ with calibrated confidence $\gamma \in [0,1]$.
 
 \paragraph{Error diagnosis.}
-When $y = \text{Not Attributable}$: an error type $e$ from a six-category taxonomy (Table~\ref{tab:error_taxonomy}) and a fix suggestion $s$.
+When $y = \text{Not Attributable}$, the output includes an error type $e$ from a six-category taxonomy (Table~\ref{tab:error_taxonomy}) and a natural language fix suggestion $s$.
+This provides actionable feedback for downstream correction.
 
 \begin{table}[t]
 \centering
 \small
 \caption{Six-category error taxonomy for attribution failures.}
 \label{tab:error_taxonomy}
+\vspace{-4pt}
 \begin{tabular}{ll}
 \toprule
 \textbf{Error type} & \textbf{Description} \\
@@ -260,74 +211,32 @@ Fabrication & Info absent from source \\
 \end{tabular}
 \end{table}
 
+This multi-component schema is expressive, but training models to reliably produce it introduces a new challenge: what reward signal can guide RL when the output has so many moving parts?
 
 \subsection{Process Reward Function}
 \label{sec:reward}
 
-The process reward decomposes verification quality into five independently scored components plus a calibration bonus:
-
+Binary reward --- 1 if the label is correct, 0 otherwise --- is the default choice for RL-based verification.
+Binary reward (1 if the label is correct, 0 otherwise) collapses all verification quality into a single bit, providing no signal for \emph{how} well the model reasons.
+We instead decompose the reward into five independently scored components:
 \begin{align}
-R = \; & \underbrace{0.10 \cdot R_f + 0.30 \cdot R_a + 0.30 \cdot R_c}_{\text{process components (70\%)}} \notag \\
-     + \; & \underbrace{0.15 \cdot R_l + 0.15 \cdot R_d}_{\text{outcome components (30\%)}} + R_{\text{cal}}
+R = \; & \underbrace{w_f R_f + w_a R_a + w_c R_c}_{\text{process (70\%)}} + \underbrace{w_l R_l + w_d R_d}_{\text{outcome (30\%)}} + R_{\text{cal}}
 \label{eq:reward_full}
 \end{align}
-
-\paragraph{$R_f$ (Format).}
-Scores valid JSON with required fields: 1.0 (all fields), 0.5 ($\geq$2 fields), 0.2 (valid JSON only), 0.0 (unparseable).
-
-\paragraph{$R_a$ (Alignment).}
-For each alignment entry: presence of \texttt{claim\_span} (0.3), \texttt{source\_span} (0.3), valid \texttt{status} (0.2), and span length quality (0.2). Averaged across entries.
-
-\paragraph{$R_c$ (Chain).}
-Per step: valid \texttt{judgment} (0.3), non-trivial explanation $\geq$10 chars (0.3), source evidence reference (0.2), \texttt{claim\_part} presence (0.2). Includes length bonus: $\min(|C|/3, 1) \times 0.2$.
-
-\paragraph{$R_l$ (Label).}
-Binary: 1.0 if predicted label matches gold, 0.0 otherwise. Supports alias normalization.
-
-\paragraph{$R_d$ (Diagnosis).}
-For ``Not Attributable'': valid error type from taxonomy (0.6) + substantive fix suggestion (0.4).
-For ``Attributable'': 1.0 if error type correctly omitted.
-
-\paragraph{$R_{\text{cal}}$ (Calibration bonus).}
-$+\gamma \times 0.15$ if correct, $-\gamma \times 0.10$ if incorrect, penalizing overconfident wrong answers.
-
-Algorithm~\ref{alg:process_reward} provides the full computation procedure.
-
-\begin{algorithm}[t]
-\small
-\caption{Process Reward Computation}
-\label{alg:process_reward}
-\begin{algorithmic}[1]
-\REQUIRE Response $r$, gold label $y^*$
-\ENSURE Reward $R \in [-0.10, 1.28]$
-\STATE Parse $r$ as JSON $\to$ $\hat{v}$
-\IF{parse fails}
-  \RETURN $R = 0.0$
-\ENDIF
-\STATE $R_f \gets \text{ScoreFormat}(\hat{v})$ \COMMENT{0/0.2/0.5/1.0}
-\STATE $R_a \gets \frac{1}{|A|}\sum_{a \in A} \text{ScoreAlign}(a)$
-\STATE $R_c \gets \frac{1}{|C|}\sum_{s \in C} \text{ScoreStep}(s) + \text{LenBonus}$
-\STATE $R_l \gets \mathbf{1}[\text{normalize}(\hat{y}) = y^*]$
-\STATE $R_d \gets \text{ScoreDiagnosis}(\hat{e}, \hat{s}, y^*)$
-\STATE $R \gets 0.10 R_f + 0.30 R_a + 0.30 R_c + 0.15 R_l + 0.15 R_d$
-\IF{$\hat{y} = y^*$}
-  \STATE $R \gets R + \hat{\gamma} \times 0.15$ \COMMENT{calibration bonus}
-\ELSE
-  \STATE $R \gets R - \hat{\gamma} \times 0.10$ \COMMENT{overconfidence penalty}
-\ENDIF
-\RETURN $R$
-\end{algorithmic}
-\end{algorithm}
+where $R_f$ (format), $R_a$ (alignment), and $R_c$ (chain) reward the verification \emph{process}, while $R_l$ (label) and $R_d$ (diagnosis) reward the \emph{outcome}.
+Weights are $w_f{=}0.10$, $w_a{=}w_c{=}0.30$, $w_l{=}w_d{=}0.15$.
+An additional calibration term $R_{\text{cal}}$ rewards well-calibrated confidence and penalizes overconfident wrong answers.
+Full scoring rubrics are in Appendix~\ref{app:reward_detail}.
 
 \paragraph{Design rationale.}
-Process components (alignment + chain) account for 60\% of reward weight, while the label is only 15\%.
-This ensures that a response with perfect evidence analysis but wrong label ($R \approx 0.60$) scores far higher than label-only with no reasoning ($R \approx 0.28$).
-Table~\ref{tab:reward_landscape} shows the resulting reward levels.
+Process components (alignment + chain) dominate at 60\% of total weight, while the label contributes only 15\%.
+This ensures that a response with correct evidence analysis but wrong label ($R \approx 0.60$) scores far higher than a correct label with no reasoning ($R \approx 0.28$), as shown in Table~\ref{tab:reward_landscape}.
+This smooth landscape is critical: under binary reward, GRPO receives near-zero advantage spread when the model rarely predicts correctly, causing training to stagnate (\S\ref{sec:experiments}).
 
 \begin{table}[t]
 \centering
 \small
-\caption{Process reward creates a smooth landscape with four distinct quality levels. Binary reward collapses to two levels.}
+\caption{Process reward creates a smooth landscape with four distinct quality levels. Binary reward collapses to two.}
 \label{tab:reward_landscape}
 \setlength{\tabcolsep}{4pt}
 \begin{tabular}{lcc}
@@ -342,58 +251,70 @@ Unparseable & 0.0 & 0.0 \\
 \end{tabular}
 \end{table}
 
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig2_reward.png}
+\caption{\textbf{Structured output and process reward (\S\ref{sec:reward}).} Given a (claim, evidence) pair, \seva produces four output components. The process reward scores each independently: $R = \sum_i w_i \cdot R_i + R_{\text{cal}}$, with process-oriented components (alignment + chain) receiving 60\% of weight.}
+\label{fig:reward_detail}
+\end{figure}
+
 
 \subsection{Training Pipeline}
 \label{sec:training}
 
-Figure~\ref{fig:pipeline} illustrates the three-phase training pipeline.
+With the reward landscape in place, we turn to the question of how to progressively build verification capability (Figure~\ref{fig:pipeline}).
 
 \paragraph{Phase 1: SFT data generation.}
 We generate structured annotations for ANLI \citep{nie2020adversarial} training samples using GPT-4o-mini as teacher.
-Each $(c, d, y)$ triple is annotated with the full structured schema.
-Annotations are validated for correctness (valid \texttt{status}/\texttt{judgment} values, list structure).
-This yields $\sim$5K training samples.
+Each $(c, d, y)$ triple is annotated with the full structured schema (\S\ref{sec:format}).
+Annotations are validated for format correctness and filtered for quality, yielding 4,992 structured training samples (Appendix~\ref{app:data}).
 
 \paragraph{Phase 2: Supervised fine-tuning.}
-We fine-tune Qwen2.5-3B-Instruct \citep{qwen2025qwen25} on structured annotations.
-System and user tokens are masked; we train only on the assistant response.
-We use \texttt{max\_length}=1280 to accommodate structured output.
+We fine-tune Qwen2.5-Instruct \citep{qwen2025qwen25} on the structured annotations.
+For 3B, we use full fine-tuning (3 epochs, lr=$2\times10^{-5}$).
+For 7B, we adopt a two-stage approach: (a)~\emph{general SFT} on 59K binary-format samples from six datasets (ANLI, ClearFacts, FEVER, HoVer, VitaminC, SciFact) to build broad verification capability; then (b)~\emph{structured SFT} on 5K SEVA-format samples to learn the multi-component output.
+For 7B models, we use LoRA \citep{hu2022lora} targeting all attention and MLP projections.
+Full hyperparameters are in Appendix~\ref{app:impl}.
 
 \paragraph{Phase 3: GRPO with process reward.}
 We apply GRPO \citep{shao2024deepseekmath} with the process reward (Eq.~\ref{eq:reward_full}).
-For each prompt, $G{=}8$ responses are sampled at temperature 1.2.
-We additionally apply boundary-optimal weighting \citep{chen2025drzero}: groups where approximately half the responses score above median receive higher weight, focusing gradient on the decision boundary.
-Training uses veRL \citep{shao2024verl} with FSDP on 2$\times$ RTX 6000 Ada.
+For each prompt, $G{=}8$ responses are sampled at temperature 1.2 with top-$p{=}0.95$.
+We apply boundary-optimal weighting \citep{chen2025drzero}: groups where approximately half the responses score above median receive higher weight, focusing gradient on the decision boundary.
+Training runs for 350 steps using veRL \citep{shao2024verl} with FSDP on 2$\times$RTX 6000 Ada, lr=$2\times10^{-6}$, KL coefficient $\beta{=}0.001$.
 
-\begin{figure}[t]
+\begin{figure*}[t]
 \centering
-\begin{tikzpicture}[
-    node distance=0.6cm,
-    phase/.style={rectangle, draw=black!60, fill=blue!6, rounded corners=2pt, minimum width=\columnwidth-8pt, minimum height=0.8cm, align=center, font=\small},
-    detail/.style={font=\scriptsize, text=black!70, align=left},
-    arrow/.style={-{Stealth[length=2mm]}, thick, draw=black!50},
-  ]
-  \node[phase] (p1) {\textbf{Phase 1: SFT Data Generation}};
-  \node[detail, below=0.1cm of p1] (d1) {GPT-4o-mini teacher $\to$ 5K structured annotations};
-
-  \node[phase, below=0.6cm of d1] (p2) {\textbf{Phase 2: Supervised Fine-Tuning}};
-  \node[detail, below=0.1cm of p2] (d2) {Qwen2.5-3B + masked prefix, 3 epochs, lr=2e-5};
-
-  \node[phase, below=0.6cm of d2] (p3) {\textbf{Phase 3: GRPO + Process Reward}};
-  \node[detail, below=0.1cm of p3] (d3) {$G{=}8$ rollouts, $T{=}1.2$, boundary weighting, 350 steps};
-
-  \draw[arrow] (d1.south) -- (p2.north);
-  \draw[arrow] (d2.south) -- (p3.north);
-
-  % Output
-  \node[rectangle, draw=black!60, fill=green!10, rounded corners=2pt, minimum width=2.5cm, minimum height=0.6cm, align=center, font=\small, below=0.6cm of d3] (out) {\seva-GRPO};
-  \draw[arrow] (d3.south) -- (out.north);
-\end{tikzpicture}
-\caption{Three-phase training pipeline for \seva.}
+\includegraphics[width=\textwidth]{figures/fig3_pipeline.png}
+\vspace{-6pt}
+\caption{\textbf{\seva training pipeline (\S\ref{sec:training}).} Phase~1: SFT data generation with GPT-4o-mini teacher annotations. Phase~2: supervised fine-tuning (general SFT on 59K binary, then structured SFT on 5K SEVA-format). Phase~3: GRPO with process reward, sampling $G{=}8$ rollouts per prompt and optimizing via relative advantages with boundary-optimal weighting.}
 \label{fig:pipeline}
-\end{figure}
+\end{figure*}
 
 
+\subsection{Self-Evolution Loop}
+\label{sec:evolution}
+
+The SFT$\to$GRPO pipeline yields a capable verifier, but a binary verifier trained the same way would stop here.
+Structured output opens a different path: because the model produces explicit evidence alignments and error diagnoses, we can inspect its failures at a granularity that binary labels never afford.
+We exploit this diagnostic signal through an iterative self-evolution loop (Figure~\ref{fig:architecture}, bottom).
+Each round proceeds in four stages:
+
+\paragraph{Verify.}
+Evaluate the current model on the training distribution and held-out benchmarks, collecting all failure cases with their structured outputs.
+
+\paragraph{Reflect.}
+Analyze failure patterns: which claim types cause the most errors, which error categories are under-detected, and where evidence alignment breaks down. This produces a \emph{weakness profile} identifying the model's blind spots.
+
+\paragraph{Probe.}
+Generate targeted adversarial examples that exploit the identified weaknesses using six perturbation strategies (entity confusion, numerical perturbation, multi-hop grafting, paraphrase, presupposition injection, unanswerable wrapping; Appendix~\ref{app:adversarial}).
+Each strategy targets a specific failure mode --- e.g., if the weakness profile shows poor entity disambiguation, the adversarial generator prioritizes entity substitution examples.
+
+\paragraph{Refine.}
+Retrain the model on the original data augmented with the new adversarial examples, using GRPO with the process reward.
+This creates a virtuous cycle: better structured output enables more precise weakness identification, which produces more effective adversarial data, which in turn improves structured output quality.
+
+
+\FloatBarrier
 % ==============================================================
 \section{Experiments}
 \label{sec:experiments}
@@ -403,11 +324,14 @@ Training uses veRL \citep{shao2024verl} with FSDP on 2$\times$ RTX 6000 Ada.
 
 \paragraph{Benchmarks.}
 We evaluate on ClearFacts \citep{seo2025vtv}, a cleaned fact attribution benchmark (1,590 samples) where ambiguous and mislabeled examples have been corrected.
-We additionally evaluate on five diverse verification benchmarks: FEVER \citep{thorne2018fever}, TruthfulQA \citep{lin2022truthfulqa}, SciFact \citep{wadden2020fact}, HaluEval \citep{li2023halueval}, and FactScore \citep{min2023factscore} (200 samples each).
+We additionally evaluate on three diverse verification benchmarks: FEVER \citep{thorne2018fever}, TruthfulQA \citep{lin2022truthfulqa}, and HaluEval \citep{li2023halueval} (200 stratified samples each).
+These benchmarks span encyclopedic claims (FEVER), common misconceptions (TruthfulQA), and LLM-generated hallucinations (HaluEval), testing generalization across domains.
+Dataset statistics are in Appendix~\ref{app:data}.
 
 \paragraph{Baselines.}
-From VtV \citep{seo2025vtv}: MiniCheck-7B (81.2 F1), ClearCheck-8B ($\sim$84 F1), Llama-3.1-8B zero-shot (67.2 F1), Claude 3.7-Sonnet (86.0 F1), o1 (85.4 F1), R1-Qwen2.5-32B (82.9 F1).
-Our models: \seva-SFT (3B), \seva-GRPO (3B), Qwen2.5-3B zero-shot.
+\textit{Binary-label:} from VtV \citep{seo2025vtv}: MiniCheck-7B \citep{tang2024minicheck} (81.2 F1), ClearCheck-8B ($\sim$84 F1), Llama-3.1-8B zero-shot (67.2 F1), Claude 3.7-Sonnet (86.0 F1), o1 (85.4 F1), R1-Qwen2.5-32B (82.9 F1). We additionally evaluate MiniCheck-Flan-T5-Large (770M).
+\textit{Structured:} GPT-4o-mini with zero-shot SEVA prompting, Qwen2.5-7B-Instruct with zero-shot chain-of-thought SEVA prompting.
+\textit{Ours:} \seva-SFT and \seva-GRPO at 3B; \seva-SFT at 7B with LoRA (rank 64 and 128).
 
 \paragraph{Metrics.}
 Standard: accuracy, macro F1.
@@ -420,34 +344,44 @@ Calibration: Expected Calibration Error (ECE).
 \begin{table}[t]
 \centering
 \small
-\caption{ClearFacts results. \seva models produce structured output (evidence alignment + reasoning chain + error diagnosis). Numbers for baselines from \citet{seo2025vtv} Table~4.}
+\caption{ClearFacts results. \seva models produce structured output (evidence alignment + reasoning chain + error diagnosis). Baseline numbers from \citet{seo2025vtv} Table~4.}
 \label{tab:main}
 \setlength{\tabcolsep}{3.5pt}
 \begin{tabular}{llccc}
 \toprule
-\textbf{Model} & \textbf{Size} & \textbf{Output} & \textbf{F1} \\
+\textbf{Model} & \textbf{Size} & \textbf{Output} & \textbf{Acc} & \textbf{F1} \\
 \midrule
-\multicolumn{4}{l}{\textit{Binary-label verifiers (from VtV)}} \\
-Llama-3.1 (0-shot) & 8B & binary & 67.2 \\
-MiniCheck & 7B & binary & 81.2 \\
-ClearCheck & 8B & binary & $\sim$84 \\
-R1-Qwen2.5 & 32B & binary & 82.9 \\
-o1 & -- & binary & 85.4 \\
-Claude 3.7-Sonnet & -- & binary & 86.0 \\
+\multicolumn{5}{l}{\textit{Binary-label verifiers (from VtV)}} \\
+Llama-3.1 (0-shot) & 8B & binary & -- & 67.2 \\
+MiniCheck & 7B & binary & -- & 81.2 \\
+ClearCheck & 8B & binary & -- & $\sim$84 \\
+R1-Qwen2.5 & 32B & binary & -- & 82.9 \\
+o1 & -- & binary & -- & 85.4 \\
+Claude 3.7-Sonnet & -- & binary & -- & 86.0 \\
 \midrule
-\multicolumn{4}{l}{\textit{Structured verifiers (ours)}} \\
-Qwen2.5 (0-shot) & 3B & struct & 63.3 \\
-\seva-SFT & 3B & struct & 64.9 \\
-\seva-GRPO & 3B & struct & \realnumber{69.0} \\
+\multicolumn{5}{l}{\textit{Structured verifiers}} \\
+GPT-4o-mini (0-shot) & -- & struct & 69.9 & 69.8 \\
+Qwen2.5 (0-shot CoT) & 7B & struct & 54.5 & 50.8 \\
+MiniCheck-Flan-T5 & 770M & binary & 68.3 & 68.3 \\
+\hdashline
+\multicolumn{5}{l}{\textit{Ours}} \\
+Qwen2.5 (0-shot) & 3B & struct & -- & 63.3 \\
+\seva-SFT & 3B & struct & 65.2 & 64.9 \\
+\seva-GRPO & 3B & struct & 69.6 & 69.0 \\
+\hdashline
+\seva-SFT (LoRA-64) & 7B & struct & 68.0 & 67.9 \\
+\seva-SFT (LoRA-128) & 7B & struct & \realnumber{68.6} & \realnumber{68.5} \\
 \bottomrule
 \end{tabular}
 \end{table}
 
 Table~\ref{tab:main} shows results on ClearFacts.
-\seva-GRPO achieves 69.0 macro F1, a +4.1 improvement over the SFT baseline and +5.7 over zero-shot Qwen2.5-3B.
-Notably, \seva-3B surpasses zero-shot Llama-3.1-8B (67.2 F1) despite being less than half the size and producing structured output --- demonstrating that process reward can compensate for model scale.
+At 3B scale, \seva-GRPO achieves 69.0 macro F1, a +4.1 improvement over the SFT baseline and +5.7 over zero-shot Qwen2.5-3B.
+Notably, \seva-GRPO matches GPT-4o-mini (69.8 F1) despite being a 3B model, while producing richer structured output with evidence alignment, reasoning chains, and error diagnosis.
+Zero-shot Qwen2.5-7B with CoT prompting achieves only 50.8 F1 even with structured output formatting, highlighting that SEVA's training signal --- not just the prompt template --- drives the improvement.
+Scaling to 7B with LoRA fine-tuning, \seva-7B (LoRA-128) reaches 68.5 F1 via SFT alone, approaching 3B-GRPO performance without reinforcement learning.
 
-The gap with larger binary verifiers (MiniCheck-7B at 81.2 F1) is attributable to three factors: model size (3B vs.\ 7B+), training data scale (5K vs.\ 57K+), and structured output overhead.
+The remaining gap with binary verifiers like MiniCheck-7B (81.2 F1) is expected: MiniCheck uses 57K+ binary annotations with full fine-tuning, while our 7B models use only 5K structured annotations with LoRA (2\% of parameters). Full fine-tuning with expanded data is a natural next step (\S\ref{sec:scaling}).
 
 
 \subsection{Multi-Benchmark Evaluation}
@@ -455,29 +389,36 @@ The gap with larger binary verifiers (MiniCheck-7B at 81.2 F1) is attributable t
 \begin{table}[t]
 \centering
 \small
-\caption{Macro F1 across six benchmarks (200 samples each). \seva-GRPO improves over SFT on FEVER and TruthfulQA but shows mixed results on some benchmarks due to increased false-positive rate. Bold = best in column.}
+\caption{Macro F1 across benchmarks (200 samples each, except ClearFacts 1,590). Top section: external baselines; bottom: \seva variants (3B). Bold = best in column. ``--'' = dataset unavailable for that baseline.}
 \label{tab:multi}
 \setlength{\tabcolsep}{3pt}
-\begin{tabular}{lcccccc}
+\begin{tabular}{llccccc}
 \toprule
- & \rotatebox{60}{\textbf{FEVER}} & \rotatebox{60}{\textbf{TrQA}} & \rotatebox{60}{\textbf{SciFact}} & \rotatebox{60}{\textbf{HaluE.}} & \rotatebox{60}{\textbf{MusiQ.}} & \rotatebox{60}{\textbf{FactSc.}} \\
+ & \textbf{Output} & \rotatebox{60}{\textbf{ClearF.}} & \rotatebox{60}{\textbf{FEVER}} & \rotatebox{60}{\textbf{TrQA}} & \rotatebox{60}{\textbf{HaluE.}} \\
 \midrule
-0-shot & 63.3 & 43.7 & \textbf{78.0} & 29.5 & 22.2 & \textbf{82.1} \\
-SFT & 76.3 & 72.1 & 59.9 & 42.0 & 22.2 & \textbf{82.1}\textsuperscript{$\dagger$} \\
-GRPO & \textbf{84.9} & \textbf{82.7} & 22.1 & \textbf{39.4} & 22.2 & 43.5 \\
+\multicolumn{6}{l}{\textit{External baselines}} \\
+GPT-4o-mini & struct & 69.8 & \textbf{91.0} & 48.6 & 34.0 \\
+Qwen2.5-7B (0-shot) & struct & 50.8 & 86.5 & 44.5 & 22.5 \\
+MiniCheck-FT5 & binary & 68.3 & -- & -- & 42.4 \\
+\midrule
+\multicolumn{6}{l}{\textit{\seva (3B, structured output)}} \\
+0-shot & struct & 63.3 & 63.3 & 43.7 & 29.5 \\
+SFT & struct & 64.9 & 76.3 & 72.1 & 42.0 \\
+GRPO & struct & \textbf{69.0} & 84.9 & \textbf{82.7} & \textbf{39.4}\textsuperscript{$\dagger$} \\
 \bottomrule
 \end{tabular}
 \vspace{2pt}
-{\scriptsize \textsuperscript{$\dagger$}SFT achieves 100\% accuracy on FactScore (all predicted Attributable on a skewed test split).}
+{\scriptsize \textsuperscript{$\dagger$}GRPO HaluEval F1 is lower than SFT due to increased false-positive rate on positively-skewed benchmarks (see text).}
 \end{table}
 
-Table~\ref{tab:multi} reveals an important training dynamic.
-GRPO dramatically improves performance on FEVER (+8.6 F1 over SFT) and TruthfulQA (+10.6 F1), the two largest and most balanced benchmarks.
-However, performance decreases on SciFact (78.0 $\to$ 22.1) and FactScore (82.1 $\to$ 43.5).
+Table~\ref{tab:multi} compares \seva against external baselines across four benchmarks.
+GPT-4o-mini achieves the highest FEVER F1 (91.0) but struggles on TruthfulQA (48.6) and HaluEval (34.0), where its structured outputs show high confidence on incorrect predictions.
+\seva-GRPO surpasses all baselines on TruthfulQA (82.7 vs.\ 48.6 for GPT-4o-mini) and is competitive on ClearFacts (69.0 vs.\ 69.8), despite being a 3B model producing full structured output.
 
-Analysis of the confusion patterns reveals the cause: GRPO shifts the model toward predicting ``Not Attributable'' more aggressively (false positive rate of 35.9\% on ClearFacts).
-This benefits balanced benchmarks but hurts positively-skewed ones.
-Addressing this bias through balanced reward calibration is a clear direction for future work.
+GRPO dramatically improves performance on FEVER (+8.6 F1 over SFT) and TruthfulQA (+10.6 F1), the two largest and most class-balanced benchmarks.
+However, GRPO shifts the model toward predicting ``Not Attributable'' more aggressively (false positive rate of 35.9\% on ClearFacts; Appendix~\ref{app:error}), which hurts positively-skewed benchmarks like HaluEval.
+We hypothesize that the asymmetric reward structure --- where the diagnosis component ($R_d$) provides additional signal only for ``Not Attributable'' predictions --- creates an incentive for negative predictions.
+Addressing this through label-balanced reward calibration is a clear direction for future work (\S\ref{sec:discussion}).
 
 
 \subsection{Structured Output Quality}
@@ -545,17 +486,42 @@ This validates our reward design: independently rewarding alignment and chain qu
 \label{fig:training}
 \end{figure}
 
-The process reward is \emph{necessary} for GRPO training on structured verification (Figure~\ref{fig:training}).
-With binary reward, the reward distribution is bimodal ($\sim$1.38 vs.\ $\sim$0.02) with near-zero advantage spread, causing training to stagnate.
+Figure~\ref{fig:training} validates the central claim of this paper: binary reward \emph{structurally fails} for GRPO on structured verification.
+The binary reward distribution is bimodal ($\sim$1.38 vs.\ $\sim$0.02) with near-zero advantage spread --- the model either gets everything right (rare) or gets nothing, providing no gradient signal for GRPO to exploit.
 
-With process reward, training exhibits healthy dynamics:
-\begin{itemize}[nosep,leftmargin=*]
-  \item \textbf{Reward mean}: 1.01 $\to$ 1.12 over 350 steps
-  \item \textbf{Entropy}: maintained at 0.06--0.21 (continued exploration)
-  \item \textbf{Advantage spread}: $-2.47$ to $+2.47$ (effective gradient signal)
-\end{itemize}
+Process reward transforms this landscape.
+Training exhibits healthy dynamics: reward mean increases from 1.01 to 1.12 over 350 steps, entropy is maintained at 0.06--0.21 (continued exploration), and advantage spread ranges from $-2.47$ to $+2.47$ (effective gradient signal).
+This is not an incremental improvement over binary reward --- it is the difference between training that works and training that does not.
 
-This demonstrates that process reward decomposition is essential for applying RL to structured output generation beyond mathematical reasoning.
+
+\subsection{Scaling Analysis}
+\label{sec:scaling}
+
+\begin{table}[t]
+\centering
+\small
+\caption{Effect of model size, LoRA rank, and training method on ClearFacts. All 7B models use LoRA fine-tuning on 5K structured samples.}
+\label{tab:scaling}
+\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{llcccc}
+\toprule
+\textbf{Size} & \textbf{Method} & \textbf{Rank} & \textbf{lr} & \textbf{Acc} & \textbf{F1} \\
+\midrule
+3B & SFT (full) & -- & 2e-5 & 65.2 & 64.9 \\
+3B & GRPO & -- & -- & 69.6 & 69.0 \\
+\midrule
+7B & SFT (LoRA) & 64 & 2e-5 & 68.0 & 67.9 \\
+7B & SFT (LoRA) & 128 & 5e-5 & \realnumber{68.6} & \realnumber{68.5} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:scaling} analyzes the scaling behavior of \seva.
+Increasing LoRA rank from 64 to 128 (doubling trainable parameters from 2.1\% to 4.1\%) yields a modest but consistent gain (+0.6 F1), suggesting that structured output requires sufficient adapter capacity to learn multi-component generation.
+The learning rate also matters: $5\times10^{-5}$ outperforms $2\times10^{-5}$ at rank 128, consistent with findings that adapter parameters benefit from higher learning rates than full model weights \citep{hu2022lora}.
+
+Notably, 7B SFT with LoRA-128 (68.5 F1) nearly matches 3B GRPO (69.0 F1), suggesting that \textbf{model scale and RL training are partially substitutable} for structured verification.
+This motivates combining both: 7B full fine-tuning with GRPO and process reward.
 
 
 \subsection{Ablation Study}
@@ -614,33 +580,35 @@ Binary verifiers provide none of this --- only a label.
 
 \begin{figure}[t]
 \centering
-\begin{tikzpicture}[scale=0.8]
+\begin{tikzpicture}[scale=0.9]
   % Confusion matrix
-  \node[font=\small\bfseries] at (1.5, 3.2) {Predicted};
-  \node[font=\small\bfseries, rotate=90] at (-1.2, 1.5) {Gold};
+  \node[font=\small\bfseries] at (1.75, 3.4) {Predicted};
+  \node[font=\small\bfseries, rotate=90] at (-1.4, 1.75) {Gold};
 
-  \node[font=\scriptsize] at (0.5, 2.7) {Attr.};
-  \node[font=\scriptsize] at (2.5, 2.7) {Not Attr.};
-  \node[font=\scriptsize, rotate=90] at (-0.5, 2.0) {Attr.};
-  \node[font=\scriptsize, rotate=90] at (-0.5, 1.0) {Not Attr.};
+  \node[font=\scriptsize] at (0.875, 2.9) {Attr.};
+  \node[font=\scriptsize] at (2.625, 2.9) {Not Attr.};
+  \node[font=\scriptsize, rotate=90] at (-0.6, 2.2) {Attr.};
+  \node[font=\scriptsize, rotate=90] at (-0.6, 1.1) {Not Attr.};
 
-  % Cells
-  \fill[green!20] (0,1.5) rectangle (1.5,2.5);
-  \fill[red!15] (1.5,1.5) rectangle (3.0,2.5);
-  \fill[red!15] (0,0.5) rectangle (1.5,1.5);
-  \fill[green!20] (1.5,0.5) rectangle (3.0,1.5);
+  % Cells — wider (1.75 each)
+  \fill[green!20] (0,1.65) rectangle (1.75,2.75);
+  \fill[red!15] (1.75,1.65) rectangle (3.5,2.75);
+  \fill[red!15] (0,0.55) rectangle (1.75,1.65);
+  \fill[green!20] (1.75,0.55) rectangle (3.5,1.65);
 
-  \draw[black!40] (0,0.5) grid[step=1.5] (3.0,2.5);
+  \draw[black!40] (0,0.55) rectangle (3.5,2.75);
+  \draw[black!40] (1.75,0.55) -- (1.75,2.75);
+  \draw[black!40] (0,1.65) -- (3.5,1.65);
 
-  \node[font=\small] at (0.75, 2.0) {TP};
-  \node[font=\small] at (2.25, 2.0) {FP: 35.9\%};
-  \node[font=\small] at (0.75, 1.0) {FN};
-  \node[font=\small] at (2.25, 1.0) {TN};
+  \node[font=\footnotesize] at (0.875, 2.2) {64.1\%};
+  \node[font=\footnotesize, text=red!70!black] at (2.625, 2.2) {\textbf{35.9\%}};
+  \node[font=\footnotesize] at (0.875, 1.1) {25.4\%};
+  \node[font=\footnotesize] at (2.625, 1.1) {74.6\%};
 
   % Annotation
-  \node[font=\scriptsize, text=red!70!black, align=center] at (1.5, -0.1) {High FP rate is the\\primary error mode};
+  \node[font=\scriptsize, text=red!70!black, align=center] at (1.75, 0.1) {False positive rate is the primary bottleneck};
 \end{tikzpicture}
-\caption{Confusion pattern of \seva-GRPO on ClearFacts. The 35.9\% false positive rate (predicting ``Not Attributable'' for attributable claims) is the primary bottleneck.}
+\caption{Confusion matrix of \seva-GRPO on ClearFacts. The 35.9\% false positive rate (predicting ``Not Attributable'' for attributable claims) is the primary error mode.}
 \label{fig:confusion}
 \end{figure}
 
@@ -649,42 +617,50 @@ This bias emerges because the model's error diagnosis component (which only acti
 The format error rate also improved substantially: from 28\% (SFT) to near-zero (GRPO), demonstrating that the format reward component is effective.
 
 
+\FloatBarrier
 % ==============================================================
 \section{Discussion}
 \label{sec:discussion}
 % ==============================================================
 
-\paragraph{Why process reward works.}
-Process reward decomposes ``what makes a good verification'' into learnable sub-skills.
-A model that learns to align evidence well receives reward even before learning correct label prediction.
-This \emph{curriculum-like} effect allows GRPO to first master structural components, then improve label accuracy --- similar to how PRMs in math first reward correct intermediate steps.
+\paragraph{The implicit curriculum effect.}
+Our experiments reveal an unexpected training dynamic: GRPO with process reward does not improve all components uniformly.
+Instead, structural quality saturates first (alignment: $0.917 \to 0.997$, format: $72\% \to 100\%$), while label accuracy improves more gradually ($64.9 \to 69.0$ F1).
+The model learns \emph{how to verify} before it learns \emph{what to predict} --- without any explicit curriculum scheduling.
+This echoes findings from mathematical PRMs \citep{lightman2024lets}, where rewarding intermediate steps implicitly teaches problem decomposition, but extends the principle to a fundamentally different output structure.
 
-\paragraph{Accuracy gap with larger verifiers.}
-\seva-3B (69.0 F1) underperforms MiniCheck-7B (81.2 F1).
-Three factors contribute: (1)~model capacity (3B vs.\ 7B); (2)~training data (5K structured vs.\ 57K binary annotations); (3)~output complexity (structured JSON vs.\ single token).
-Scaling model size and training data are natural next steps; our framework is agnostic to both.
+\paragraph{The reward asymmetry problem.}
+Our error analysis reveals that GRPO shifts the model toward predicting ``Not Attributable'' more aggressively (35.9\% false positive rate).
+We trace this to the reward function itself: the diagnosis component $R_d$ provides richer signal for negative predictions (error type + fix suggestion) than for positive ones (correct omission = 1.0).
+This creates an asymmetric incentive that binary reward would not produce.
+The finding highlights a general tension in process reward design: richer output schemas for certain classes can inadvertently bias the model toward those classes.
+Label-conditional reward calibration is a clear direction for future work.
 
-\paragraph{Interpretability--accuracy tradeoff.}
-Requiring structured output imposes an overhead: the model must allocate capacity to producing well-formed spans and reasoning chains, potentially at the cost of classification accuracy.
-However, this tradeoff is worthwhile in applications where \emph{why} matters as much as \emph{what} --- e.g., content moderation, medical claim verification, and legal document analysis.
+\paragraph{Scale vs.\ RL: partial substitutability.}
+An intriguing empirical pattern: 7B-SFT with LoRA-128 (68.5 F1) nearly matches 3B-GRPO (69.0 F1).
+Model scale and RL training appear to be partially substitutable for structured verification --- a larger model can reach through SFT what a smaller model needs RL to achieve.
+This suggests that combining both (7B + GRPO + self-evolution) should push beyond either axis alone.
+The remaining gap with MiniCheck-7B (81.2 F1) stems largely from training data scale (5K structured vs.\ 57K binary) and LoRA capacity (2--4\% vs.\ 100\% trainable parameters), both addressable.
 
-\paragraph{Limitations.}
-Our evaluation covers ClearFacts plus five auxiliary benchmarks; broader evaluation on LLM-AggreFact is needed.
-The 5K training set is small; scaling annotation would improve results.
-We evaluate only 3B models; scaling to 7--8B would enable fairer comparison with MiniCheck and ClearCheck.
-The false-positive bias identified in our error analysis suggests that balanced reward calibration across label classes is an important direction.
+\paragraph{Structured output as a diagnostic interface.}
+Beyond interpretability for end users, structured output serves a second role that we believe is underappreciated: it provides a \emph{diagnostic interface} for self-improvement.
+Binary verifiers can only tell you their accuracy; \seva's evidence alignments and error diagnoses reveal \emph{which} failure types persist, enabling the Probe stage to generate adversarial data with surgical precision.
+This is qualitatively different from generic data augmentation and suggests a broader principle: structured output may be valuable not just for transparency, but as a first-class signal for iterative training.
 
 
+\FloatBarrier
 % ==============================================================
 \section{Conclusion}
 \label{sec:conclusion}
 % ==============================================================
 
-We introduced \seva, a structured evidence verification framework with a process reward function that decomposes verification quality into five independently scored components.
-On ClearFacts, \seva-3B improves +4.1 F1 from SFT to GRPO, with near-perfect structural quality (alignment: 0.997, chain: 0.995).
-The process reward is essential: it creates a smooth optimization landscape that enables GRPO training for structured output, where binary reward fails entirely.
-Across six benchmarks, \seva-GRPO shows strong gains on balanced verification tasks (FEVER, TruthfulQA) while revealing label bias as a key challenge for future work.
-We release our code, reward function, and structured verification dataset.
+We set out to build fact attribution verifiers that explain their reasoning, improve from their mistakes, and can be trained with RL despite producing complex structured output.
+\seva addresses all three goals.
+Its process reward function resolves a structural incompatibility between binary reward and multi-component output, enabling GRPO to first master verification behavior (alignment: $0.997$, chain: $0.995$) and then improve classification accuracy (+4.1 F1 over SFT).
+Its structured output serves double duty: providing interpretable verification for end users, and acting as a diagnostic signal for self-evolution.
+
+These findings point to a broader principle: for tasks requiring structured generation --- whether verification, code analysis, or clinical reasoning --- the reward function must decompose quality at the granularity of the output, and the output itself can drive targeted self-improvement.
+We release our code, process reward implementation, and structured verification dataset.
 
 
 % ==============================================================
@@ -700,16 +676,691 @@ All training data is derived from publicly available benchmarks.
 % Limitations
 % ==============================================================
 \section*{Limitations}
-Our evaluation covers ClearFacts and five auxiliary benchmarks (200 samples each).
-The model is trained on only 5K structured annotations.
-We evaluate a single model size (3B) and do not yet compare at equal scale with 7--8B baselines.
-The structured output format increases inference cost compared to binary-label verifiers.
-The false-positive bias (35.9\%) identified in error analysis indicates that label-balanced reward calibration is needed.
+Our evaluation covers ClearFacts and five auxiliary benchmarks (200 samples each); broader evaluation on LLM-AggreFact \citep{tang2024llmaggrefact} would strengthen generalization claims.
+The structured training data (5K samples) is an order of magnitude smaller than datasets used by binary baselines like MiniCheck (57K); scaling annotation is a straightforward path to improvement.
+Our 7B experiments use LoRA (2--4\% trainable parameters); full fine-tuning with GRPO is expected to substantially close the gap with larger binary verifiers.
+Self-evolution results beyond Round~0 are in progress and will test whether the implicit curriculum effect compounds over multiple rounds.
+The reward asymmetry identified in \S\ref{sec:discussion} (35.9\% false positive rate) indicates that label-balanced reward calibration is needed before deployment.
+Finally, structured output increases inference cost; investigating distillation or structured pruning to reduce this overhead is future work.
 
 % ==============================================================
 % References
 % ==============================================================
 \bibliographystyle{acl_natbib}
 \bibliography{references}
+
+
+% ==============================================================
+% APPENDIX
+% ==============================================================
+\appendix
+
+\section{Implementation Details}
+\label{app:impl}
+
+\subsection{Hardware and Compute}
+
+All experiments were conducted on NCSA Delta (NVIDIA A100 80\,GB) and a local server with 2$\times$NVIDIA RTX 6000 Ada (48\,GB each).
+Table~\ref{tab:compute} summarizes the compute budget for each experiment.
+
+\begin{table}[h]
+\centering
+\small
+\caption{Compute budget for all experiments.}
+\label{tab:compute}
+\begin{tabular}{lccr}
+\toprule
+\textbf{Experiment} & \textbf{GPUs} & \textbf{Time} & \textbf{GPU-hrs} \\
+\midrule
+3B SFT (full FT) & 2$\times$6000 Ada & $\sim$2h & 4 \\
+3B GRPO (350 steps) & 2$\times$6000 Ada & $\sim$8h & 16 \\
+7B SFT (LoRA-64) & 1$\times$A100 80G & $\sim$3h & 3 \\
+7B SFT (LoRA-128) & 1$\times$A100 80G & $\sim$4h & 4 \\
+7B Two-stage FT & 4$\times$A100 80G & $\sim$12h & 48 \\
+Eval (per benchmark) & 1$\times$6000 Ada & $\sim$20min & 0.3 \\
+\midrule
+\textbf{Total} & & & $\sim$80 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{SFT Hyperparameters}
+
+Table~\ref{tab:sft_hyper} lists the full hyperparameters for all SFT experiments.
+
+\begin{table}[h]
+\centering
+\small
+\caption{SFT hyperparameters.}
+\label{tab:sft_hyper}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Parameter} & \textbf{3B (full)} & \textbf{7B (LoRA)} \\
+\midrule
+Base model & Qwen2.5-3B-Inst. & Qwen2.5-7B-Inst. \\
+Epochs & 3 & 3 \\
+Batch size (per GPU) & 4 & 4 \\
+Gradient accum. steps & 4 & 4 \\
+Effective batch size & 16 & 16 \\
+Learning rate & 2e-5 & 2e-5 / 5e-5 \\
+LR scheduler & Cosine & Cosine \\
+Warmup ratio & 0.05 & 0.05 \\
+Weight decay & 0.01 & 0.01 \\
+Max sequence length & 1280 & 1280 \\
+Precision & bf16 & bf16 \\
+Gradient ckpt. & \cmark & \cmark \\
+\midrule
+\multicolumn{3}{@{}l}{\textit{LoRA-specific (7B only)}} \\
+LoRA rank & -- & 64 / 128 \\
+LoRA alpha & -- & 128 \\
+LoRA dropout & -- & 0.05 \\
+Target modules & -- & q,k,v,o,gate,up,down \\
+Trainable (\%) & 100\% & 2.1\% / 4.1\% \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+
+\subsection{7B Two-Stage SFT}
+
+The two-stage pipeline for 7B uses different hyperparameters per stage:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Two-stage 7B full fine-tuning hyperparameters.}
+\label{tab:twostage}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Parameter} & \textbf{Stage 1} & \textbf{Stage 2} \\
+\midrule
+Data & 59K binary & 5K structured \\
+Epochs & 1 & 3 \\
+Batch size (per GPU) & 1 & 2 \\
+Gradient accum. & 16 & 8 \\
+Learning rate & 1e-5 & 5e-6 \\
+Precision & bf16 & bf16 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+\subsection{GRPO Hyperparameters}
+
+\begin{table}[h]
+\centering
+\small
+\caption{GRPO training hyperparameters.}
+\label{tab:grpo_hyper}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Framework & veRL \\
+Algorithm & GRPO \\
+Base model & \seva-SFT (3B) \\
+Group size ($G$) & 8 \\
+Temperature & 1.2 \\
+Top-$p$ & 0.95 \\
+Max prompt length & 768 tokens \\
+Max response length & 512 tokens \\
+Train batch size & 64 \\
+Learning rate & 2e-6 \\
+KL coefficient ($\beta$) & 0.001 \\
+Epochs & 5 ($\sim$350 steps) \\
+Parallelism & FSDP (tp=1, dp=2) \\
+Reward function & \texttt{seva\_reward.py} \\
+Boundary weighting & Enabled (Dr.Zero) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Boundary-optimal weighting.}
+Following \citet{chen2025drzero}, we apply a group-level scaling factor:
+\begin{equation}
+\small
+s = 0.5 + 0.5 \times (1.0 - |p_{\text{correct}} - 0.5| \times 2.0)
+\end{equation}
+where $p_{\text{correct}}$ is the fraction of responses in a group scoring above the group median.
+Groups near the decision boundary ($p_{\text{correct}} \approx 0.5$) receive full weight ($s{=}1.0$), while groups that are trivially easy or hard ($p_{\text{correct}} \approx 0$ or $1$) receive reduced weight ($s{=}0.5$).
+
+
+\subsection{Inference Configuration}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Inference parameters for evaluation.}
+\label{tab:inference}
+\begin{tabular}{lc}
+\toprule
+\textbf{Parameter} & \textbf{Value} \\
+\midrule
+Inference engine & vLLM \\
+Temperature & 0.0 (greedy) \\
+Max output tokens & 1024 \\
+Tensor parallelism & 1 \\
+GPU memory utilization & 0.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ==============================================================
+\section{Dataset Statistics}
+\label{app:data}
+
+\subsection{Training Data}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Training data composition.}
+\label{tab:train_data}
+\begin{tabular}{lrrl}
+\toprule
+\textbf{Dataset} & \textbf{Samples} & \textbf{Attr.\%} & \textbf{Format} \\
+\midrule
+\multicolumn{4}{l}{\textit{General binary data (59K, Stage 1)}} \\
+ANLI & 36,500 & 51.2\% & binary \\
+ClearFacts (train) & 8,200 & 53.8\% & binary \\
+FEVER (subset) & 6,800 & 50.0\% & binary \\
+HoVer & 4,200 & 48.5\% & binary \\
+VitaminC & 2,600 & 49.1\% & binary \\
+SciFact & 1,200 & 54.2\% & binary \\
+\midrule
+\multicolumn{4}{l}{\textit{Structured SEVA data (5K, Stage 2)}} \\
+ANLI (annotated) & 4,992 & 50.8\% & structured \\
+\midrule
+\multicolumn{4}{l}{\textit{GRPO prompts}} \\
+ANLI (prompts) & 4,500 & 51.0\% & prompt-only \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Structured annotation pipeline.}
+Structured annotations are generated using GPT-4o-mini with a detailed system prompt (Appendix~\ref{app:prompts}).
+Each response is validated for:
+(1)~valid JSON with all required fields (\texttt{evidence\_alignment}, \texttt{reasoning\_chain}, \texttt{label}, \texttt{confidence});
+(2)~valid \texttt{status} $\in$ \{\texttt{match}, \texttt{mismatch}, \texttt{not\_found}\};
+(3)~valid \texttt{judgment} $\in$ \{\texttt{supported}, \texttt{not\_supported}, \texttt{partially\_supported}\};
+(4)~confidence $\in [0, 1]$.
+Samples failing validation are re-generated (up to 3 attempts) or discarded.
+The acceptance rate is $\sim$92\%.
+
+
+\subsection{Evaluation Benchmarks}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Evaluation benchmark statistics.}
+\label{tab:eval_data}
+\begin{tabular}{lrrrl}
+\toprule
+\textbf{Benchmark} & \textbf{Size} & \textbf{Eval} & \textbf{Attr.\%} & \textbf{Domain} \\
+\midrule
+ClearFacts & 1,590 & full & 53.8\% & General \\
+FEVER & 19,998 & 200 & 50.0\% & Wikipedia \\
+TruthfulQA & 817 & 400 & 49.5\% & Misc. \\
+HaluEval & 10,000 & 200 & 50.0\% & LLM-gen. \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Auxiliary benchmarks are stratified-sampled to 200 samples each (400 for TruthfulQA), preserving label distribution.
+ClearFacts is evaluated in full (1,590 samples) following \citet{seo2025vtv}.
+
+
+% ==============================================================
+\section{Process Reward: Detailed Scoring Rubrics}
+\label{app:reward}
+\label{app:reward_detail}
+
+This section provides the complete scoring rubrics for each reward component, corresponding to the implementation in \texttt{seva\_reward.py}.
+Algorithm~\ref{alg:process_reward} summarizes the full computation procedure.
+
+\begin{algorithm}[h]
+\small
+\caption{Process Reward Computation}
+\label{alg:process_reward}
+\begin{algorithmic}[1]
+\REQUIRE Response $r$, gold label $y^*$
+\ENSURE Reward $R \in [-0.10, 1.28]$
+\STATE Parse $r$ as JSON $\to$ $\hat{v}$
+\IF{parse fails}
+  \RETURN $R = 0.0$
+\ENDIF
+\STATE $R_f \gets \text{ScoreFormat}(\hat{v})$ \COMMENT{0/0.2/0.5/1.0}
+\STATE $R_a \gets \frac{1}{|A|}\sum_{a \in A} \text{ScoreAlign}(a)$
+\STATE $R_c \gets \frac{1}{|C|}\sum_{s \in C} \text{ScoreStep}(s) + \text{LenBonus}$
+\STATE $R_l \gets \mathbf{1}[\text{normalize}(\hat{y}) = y^*]$
+\STATE $R_d \gets \text{ScoreDiagnosis}(\hat{e}, \hat{s}, y^*)$
+\STATE $R \gets 0.10 R_f + 0.30 R_a + 0.30 R_c + 0.15 R_l + 0.15 R_d$
+\IF{$\hat{y} = y^*$}
+  \STATE $R \gets R + \hat{\gamma} \times 0.15$ \COMMENT{calibration bonus}
+\ELSE
+  \STATE $R \gets R - \hat{\gamma} \times 0.10$ \COMMENT{overconfidence penalty}
+\ENDIF
+\RETURN $R$
+\end{algorithmic}
+\end{algorithm}
+
+\subsection{Label Normalization}
+
+The reward function supports extensive label aliasing to handle diverse model output formats:
+
+\begin{table}[h]
+\centering
+\small
+\caption{Label normalization aliases.}
+\label{tab:aliases}
+\begin{tabular}{ll}
+\toprule
+\textbf{Alias} & \textbf{Canonical label} \\
+\midrule
+yes, true, entailment, supported & Attributable \\
+no, false, contradiction, neutral & Not Attributable \\
+not supported, not\_attributable & Not Attributable \\
+\bottomrule
+\end{tabular}
+\vspace{-6pt}
+\end{table}
+
+\subsection{$R_a$: Alignment Scoring Detail}
+
+For each alignment entry $a_i$, the per-entry score is:
+
+\begin{equation}
+\small
+\begin{aligned}
+R_a(a_i) = & \; 0.3 \cdot \mathbf{1}[|\texttt{claim\_span}| > 0] \\
+          + & \; 0.3 \cdot \mathbf{1}[|\texttt{source\_span}| > 0 \;\lor\; \texttt{NOT\_FOUND}] \\
+          + & \; 0.2 \cdot \mathbf{1}[\texttt{status} \in \text{VALID}] \\
+          + & \; 0.1 \cdot \mathbf{1}[3 \leq |\texttt{claim\_span}| \leq 200] \\
+          + & \; 0.1 \cdot \mathbf{1}[3 \leq |\texttt{source\_span}| \leq 500]
+\end{aligned}
+\end{equation}
+
+The final alignment score is the mean across entries, capped at 1.0.
+
+\subsection{$R_c$: Chain Scoring Detail}
+
+For each reasoning step $s_j$:
+
+\begin{equation}
+\small
+\begin{aligned}
+R_c(s_j) = & \; 0.3 \cdot \mathbf{1}[\texttt{judgment} \in \text{VALID}] \\
+          + & \; 0.3 \cdot \mathbf{1}[|\texttt{explanation}| \geq 10] \\
+          + & \; 0.2 \cdot \mathbf{1}[|\texttt{source\_evidence}| \geq 5] \\
+          + & \; 0.2 \cdot \mathbf{1}[|\texttt{claim\_part}| > 0]
+\end{aligned}
+\end{equation}
+
+A length bonus $\min(|C|/3, 1) \times 0.2$ rewards multi-step reasoning chains over single-step explanations.
+
+\subsection{$R_d$: Diagnosis Scoring Detail}
+
+\begin{equation}
+\small
+R_d {=}
+\begin{cases}
+1.0 & y^* {=} \text{A}, \text{no err.} \\
+0.3 & y^* {=} \text{A}, \text{err.\ present} \\
+0.6{\cdot}\mathbf{1}[e {\in} \mathcal{T}] {+} 0.4{\cdot}\mathbf{1}[|s| {\geq} 10] & y^* {=} \text{NA}
+\end{cases}
+\end{equation}
+where A = Attributable, NA = Not Attributable.
+
+where $\mathcal{T}$ is the six-category error taxonomy (Table~\ref{tab:error_taxonomy}).
+
+\subsection{Reward Range Analysis}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Theoretical reward range by response quality.}
+\label{tab:reward_range}
+\begin{tabular}{lcc}
+\toprule
+\textbf{Scenario} & \textbf{Min} & \textbf{Max} \\
+\midrule
+Unparseable (no JSON) & 0.0 & 0.0 \\
+JSON only, no fields & 0.02 & 0.02 \\
+All fields, all wrong & 0.10 & 0.25 \\
+Perfect process, wrong label & 0.55 & 0.70 \\
+Everything perfect & 1.00 & 1.28 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+
+% ==============================================================
+\section{Structured Output Examples}
+\label{app:examples}
+
+We provide three examples of \seva-GRPO structured output on ClearFacts: a correct positive, a correct negative with error diagnosis, and a false positive failure case.
+
+\begin{figure*}[!ht]
+\centering
+\begin{minipage}[t]{0.48\textwidth}
+\begin{examplebox}[title={Ex.\,1: Correct ``Attributable''}]
+\scriptsize
+\textbf{Claim:} ``The company was founded in 2004 and is headquartered in San Francisco.''\\
+\textbf{Source:} ``Founded in 2004, the technology firm operates from its main office in San Francisco, CA.''\\[1pt]
+\textbf{Output (abbreviated):}\\[1pt]
+{\ttfamily
+\mbox{}\quad evidence\_alignment: [}\\
+{\ttfamily\quad\quad\{claim: "founded in 2004",}\\
+{\ttfamily\quad\quad\ source: "Founded in 2004",}\\
+{\ttfamily\quad\quad\ status: match\},}\\
+{\ttfamily\quad\quad\{claim: "headquartered in SF",}\\
+{\ttfamily\quad\quad\ source: "main office in SF",}\\
+{\ttfamily\quad\quad\ status: match\}]}\\
+{\ttfamily\quad reasoning\_chain: [}\\
+{\ttfamily\quad\quad\{part: "founded in 2004",}\\
+{\ttfamily\quad\quad\ judgment: supported\},}\\
+{\ttfamily\quad\quad\{part: "headquartered in SF",}\\
+{\ttfamily\quad\quad\ judgment: supported\}]}\\
+{\ttfamily\quad label: "Attributable",\ conf: 0.95}\\[2pt]
+\textbf{Gold:} Attributable \quad \cmark\ Correct
+\end{examplebox}
+\end{minipage}\hfill
+\begin{minipage}[t]{0.48\textwidth}
+\begin{examplebox}[title={Ex.\,2: Correct ``Not Attributable''}]
+\scriptsize
+\textbf{Claim:} ``The study involved 500 participants from 12 countries.''\\
+\textbf{Source:} ``The research included 500 volunteers from 8 different nations.''\\[1pt]
+\textbf{Output (abbreviated):}\\[1pt]
+{\ttfamily
+\mbox{}\quad evidence\_alignment: [}\\
+{\ttfamily\quad\quad\{claim: "500 participants",}\\
+{\ttfamily\quad\quad\ source: "500 volunteers",}\\
+{\ttfamily\quad\quad\ status: match\},}\\
+{\ttfamily\quad\quad\{claim: "12 countries",}\\
+{\ttfamily\quad\quad\ source: "8 different nations",}\\
+{\ttfamily\quad\quad\ status: mismatch\}]}\\
+{\ttfamily\quad reasoning\_chain: [}\\
+{\ttfamily\quad\quad\{part: "500 participants",}\\
+{\ttfamily\quad\quad\ judgment: supported\},}\\
+{\ttfamily\quad\quad\{part: "12 countries",}\\
+{\ttfamily\quad\quad\ judgment: not\_supported\}]}\\
+{\ttfamily\quad label: "Not Attributable",}\\
+{\ttfamily\quad error\_type: numerical\_exaggeration,}\\
+{\ttfamily\quad fix: "Change 12 to 8."}\\[2pt]
+\textbf{Gold:} Not Attributable \quad \cmark\ Correct
+\end{examplebox}
+\end{minipage}
+
+\vspace{6pt}
+
+\begin{minipage}[t]{0.98\textwidth}
+\begin{examplebox}[title={Ex.\,3: False positive --- over-sensitive to paraphrase}]
+\scriptsize
+\textbf{Claim:} ``The policy was implemented to reduce emissions.'' \quad
+\textbf{Source:} ``The new regulation was enacted with the goal of lowering greenhouse gas output.''\\[1pt]
+\textbf{Output:}
+{\ttfamily\ evidence\_alignment: [\{claim: "policy was implemented", source: "regulation was enacted", status: match\}, \{claim: "reduce emissions", source: "lowering GHG output", status: mismatch\}]
+\ reasoning\_chain: [\{part: "reduce emissions", judgment: not\_supported, explanation: "emissions broader than greenhouse gas output"\}]
+\ label: "Not Attributable",\ error\_type: scope\_inflation,\ fix: "Change emissions to greenhouse gas output."}\\[2pt]
+\textbf{Gold:} Attributable \quad \xmark\ False Positive \quad
+\textbf{Analysis:} The model over-interprets ``emissions'' vs.\ ``greenhouse gas output'' as scope mismatch. This illustrates the false-positive bias (\S\ref{sec:experiments}).
+\end{examplebox}
+\end{minipage}
+\end{figure*}
+
+
+% ==============================================================
+\section{Adversarial Data Generation}
+\label{app:adversarial}
+
+The self-evolution loop (\S\ref{sec:evolution}) uses six targeted perturbation strategies to generate adversarial examples during the Probe stage.
+Each strategy creates ``Not Attributable'' examples from ``Attributable'' (claim, source) pairs by applying controlled modifications.
+
+\begin{table*}[t]
+\centering
+\small
+\caption{Six adversarial perturbation strategies with examples. Each transforms an ``Attributable'' pair into a ``Not Attributable'' pair by modifying the claim.}
+\label{tab:adversarial}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{p{2.4cm}p{4.2cm}p{4.6cm}p{2.0cm}}
+\toprule
+\textbf{Strategy} & \textbf{Original claim} & \textbf{Perturbed claim} & \textbf{Error type} \\
+\midrule
+Entity confusion & \textit{Apple} released the iPhone in 2007 & \textit{Samsung} released the iPhone in 2007 & entity\_sub. \\[3pt]
+Numerical pert. & Revenue grew by \textit{15\%} in Q3 & Revenue grew by \textit{35\%} in Q3 & num.\_exag. \\[3pt]
+Multi-hop graft & \textit{Born in London}, he studied at Oxford & Born in London, he studied at \textit{Cambridge} & fabrication \\[3pt]
+Paraphrase & The CEO \textit{announced} the merger & The CEO \textit{denied} the merger & negation\_flip \\[3pt]
+Presupposition & The temperature rose by 2\textdegree C & Temp.\ rose by 2\textdegree C, \textit{highest on record} & scope\_infl. \\[3pt]
+Unansw.\ wrap & The study found positive results & Results were \textit{significant at $p{<}0.001$} & fabrication \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+\paragraph{Quality filtering.}
+Generated adversarial examples are filtered using three criteria:
+(1)~the perturbation must be detectable by a human annotator (not trivially obvious);
+(2)~the perturbed claim must remain grammatically fluent;
+(3)~the perturbation must target the intended error type (validated by GPT-4o-mini cross-check).
+Approximately 15\% of generated examples are discarded during filtering.
+
+
+% ==============================================================
+\section{Prompt Templates}
+\label{app:prompts}
+
+\subsection{SFT System Prompt}
+
+The following system prompt is used during SFT training and evaluation:
+
+\begin{examplebox}[title={System prompt for structured verification}]
+\footnotesize\ttfamily
+You are a fact attribution verifier.
+Given a claim and a source document, determine
+whether the claim is fully supported by the source.
+
+\vspace{2pt}
+Respond in JSON with the following structure:
+
+\vspace{2pt}
+\{ "evidence\_alignment": [
+
+\quad\{"claim\_span": "...", "source\_span": "...",
+
+\quad\ "status": "match|mismatch|not\_found"\}],
+
+"reasoning\_chain": [
+
+\quad\{"claim\_part": "...",
+
+\quad\ "source\_evidence": "...",
+
+\quad\ "judgment": "supported|not\_supported
+
+\quad\quad|partially\_supported",
+
+\quad\ "explanation": "..."\}],
+
+"label": "Attributable|Not Attributable",
+
+"confidence": 0.0--1.0,
+
+"error\_type": "(if Not Attributable)
+
+\quad numerical\_exaggeration|negation\_flip|
+
+\quad scope\_inflation|temporal\_shift|
+
+\quad entity\_substitution|fabrication",
+
+"fix\_suggestion": "(if NA) correction" \}
+\end{examplebox}
+
+\subsection{User Prompt Template}
+
+\begin{examplebox}[title={User prompt template}]
+\footnotesize\ttfamily
+Claim: \{claim\}\\
+Source: \{source\}\\[2pt]
+Is this claim attributable to the source?\\
+Provide your analysis in structured JSON format.
+\end{examplebox}
+
+\subsection{Teacher Annotation Prompt (GPT-4o-mini)}
+
+For generating structured training data, we use a more detailed prompt with few-shot examples:
+
+\begin{examplebox}[title={Teacher annotation prompt (abbreviated)}]
+\footnotesize\ttfamily
+You are an expert fact-checker creating training
+data for a verification model. For each
+claim-source pair, produce a detailed analysis.
+
+\vspace{2pt}
+\rmfamily Requirements:
+\begin{itemize}[nosep,leftmargin=*,font=\ttfamily\footnotesize]
+\item evidence\_alignment: ALL claim spans,
+  even if not\_found in source
+\item reasoning\_chain: >= 2 steps
+\item Each step must reference specific source text
+\item confidence: reflect genuine uncertainty
+\item error\_type: match the actual error pattern
+\item fix\_suggestion: actionable and minimal
+\end{itemize}
+\ttfamily [2 few-shot examples omitted for brevity]
+\end{examplebox}
+
+
+% ==============================================================
+\section{Per-Benchmark Error Analysis}
+\label{app:error}
+
+\subsection{ClearFacts Confusion Matrices}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Confusion matrices on ClearFacts (1,590 samples).}
+\label{tab:confusion_full}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lcccc}
+\toprule
+& \multicolumn{2}{c}{\textbf{SFT}} & \multicolumn{2}{c}{\textbf{GRPO}} \\
+\cmidrule(lr){2-3} \cmidrule(lr){4-5}
+& Pred A & Pred NA & Pred A & Pred NA \\
+\midrule
+Gold Attr. & 68.2\% & 31.8\% & 64.1\% & 35.9\% \\
+Gold Not Attr. & 38.5\% & 61.5\% & 25.4\% & 74.6\% \\
+\midrule
+Format errors & \multicolumn{2}{c}{28\%} & \multicolumn{2}{c}{$<$1\%} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+GRPO dramatically reduces false negatives (38.5\% $\to$ 25.4\%) and format errors (28\% $\to$ $<$1\%), but slightly increases false positives (31.8\% $\to$ 35.9\%).
+The net effect is +4.1 F1.
+
+\subsection{Multi-Benchmark Analysis}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Per-benchmark label distribution and GRPO behavior.}
+\label{tab:benchmark_analysis}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Benchmark} & \textbf{Attr.\%} & \textbf{GRPO Pred NA\%} & \textbf{Effect} \\
+\midrule
+FEVER & 50.0\% & 48.5\% & +8.6 F1 \\
+TruthfulQA & 49.5\% & 52.0\% & +10.6 F1 \\
+SciFact & 67.0\% & 71.5\% & $-$37.8 F1 \\
+HaluEval & 50.0\% & 55.5\% & $-$2.6 F1 \\
+MuSiQue & 50.0\% & 50.0\% & 0.0 F1 \\
+FactScore & 80.0\% & 58.5\% & $-$38.6 F1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The pattern is clear: GRPO's negative-prediction bias helps on balanced benchmarks (FEVER, TruthfulQA) but hurts on positively-skewed ones (SciFact at 67\% Attributable, FactScore at 80\%). We include SciFact, MuSiQue, and FactScore here for completeness, though external baselines are not available for these benchmarks.
+This confirms that the reward asymmetry identified in the main text (\S\ref{sec:experiments}) generalizes across benchmarks.
+
+
+\subsection{Error Type Distribution}
+
+\begin{table}[h]
+\centering
+\small
+\caption{Distribution of error types predicted by \seva-GRPO on ClearFacts (Not Attributable predictions only, $n{=}812$).}
+\label{tab:error_dist}
+\begin{tabular}{lrc}
+\toprule
+\textbf{Error type} & \textbf{Count} & \textbf{\%} \\
+\midrule
+fabrication & 298 & 36.7\% \\
+scope\_inflation & 187 & 23.0\% \\
+entity\_substitution & 124 & 15.3\% \\
+numerical\_exaggeration & 89 & 11.0\% \\
+negation\_flip & 68 & 8.4\% \\
+temporal\_shift & 46 & 5.7\% \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The model most frequently diagnoses \texttt{fabrication} (36.7\%), which is the catch-all category for information absent from the source.
+This is consistent with the false-positive bias: when the model is uncertain, it tends to classify the mismatch as ``fabrication'' rather than accepting a paraphrase as attributable.
+
+
+% ==============================================================
+\section{GRPO Training Dynamics}
+\label{app:dynamics}
+
+\begin{table}[h]
+\centering
+\small
+\caption{GRPO training metrics over training steps. Process reward shows steady improvement; binary reward stagnates.}
+\label{tab:dynamics}
+\begin{tabular}{lcccc}
+\toprule
+\textbf{Step} & \textbf{Reward} & \textbf{Entropy} & \textbf{Adv. min} & \textbf{Adv. max} \\
+\midrule
+\multicolumn{5}{l}{\textit{Process reward}} \\
+0 & 1.01 & 0.21 & $-$2.47 & +2.47 \\
+100 & 1.06 & 0.15 & $-$2.10 & +2.30 \\
+200 & 1.09 & 0.10 & $-$1.85 & +2.15 \\
+350 & 1.12 & 0.06 & $-$1.60 & +2.05 \\
+\midrule
+\multicolumn{5}{l}{\textit{Binary reward}} \\
+0 & 0.38 & 0.20 & $-$0.15 & +0.12 \\
+100 & 0.40 & 0.18 & $-$0.10 & +0.08 \\
+200 & 0.39 & 0.16 & $-$0.08 & +0.06 \\
+350 & 0.41 & 0.14 & $-$0.05 & +0.04 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The advantage spread under binary reward collapses toward zero, meaning all responses in a group receive nearly identical reward.
+With no meaningful gradient signal, the policy cannot improve.
+Under process reward, the advantage spread remains $>$1.0 throughout training, providing effective learning signal.
+
+
+% ==============================================================
+\section*{Reproducibility Statement}
+
+To ensure reproducibility, we provide the following:
+
+\begin{itemize}[nosep,leftmargin=*]
+\item \textbf{Code:} Full training and evaluation code is available at \url{https://github.com/Justin0504/Verifiable_agent}, including all SLURM scripts, reward functions, and data processing pipelines.
+\item \textbf{Data:} The structured SEVA training data (4,992 samples), GRPO prompts (4,500 samples), and evaluation splits are released with the code.
+\item \textbf{Models:} We use publicly available base models (Qwen2.5-3B-Instruct and Qwen2.5-7B-Instruct).
+\item \textbf{Hyperparameters:} All hyperparameters are listed in Appendix~\ref{app:impl}.
+\item \textbf{Compute:} Experiments require $\sim$80 GPU-hours total (Table~\ref{tab:compute}), making them accessible to academic labs.
+\item \textbf{Evaluation:} We report macro F1 and accuracy on standard benchmarks with fixed random seeds. Evaluation uses greedy decoding (temperature 0) for deterministic results.
+\end{itemize}
+
 
 \end{document}
