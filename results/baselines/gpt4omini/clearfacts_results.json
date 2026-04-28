@@ -1,0 +1,13 @@
+{
+  "benchmark": "clearfacts",
+  "model": "gpt-4o-mini",
+  "output_type": "structured",
+  "n_samples": 1590,
+  "accuracy": 0.6987421383647798,
+  "macro_f1": 0.6975696690504185,
+  "ece": 0.20842767295597264,
+  "format_error_rate": 0.0012578616352201257,
+  "avg_alignment_quality": 0.8645702306079683,
+  "avg_chain_quality": 0.8675052410901491,
+  "avg_groundedness": 0.9096630727762806
+}

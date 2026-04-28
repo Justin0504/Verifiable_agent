@@ -1,0 +1,13 @@
+{
+  "benchmark": "halueval",
+  "model": "gpt-4o-mini",
+  "output_type": "structured",
+  "n_samples": 200,
+  "accuracy": 0.515,
+  "macro_f1": 0.33993399339933994,
+  "ece": 0.29949999999999993,
+  "format_error_rate": 0.0,
+  "avg_alignment_quality": 0.8716666666666667,
+  "avg_chain_quality": 0.865,
+  "avg_groundedness": 0.9340833333333335
+}

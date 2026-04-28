@@ -1,0 +1,13 @@
+{
+  "benchmark": "fever",
+  "model": "gpt-4o-mini",
+  "output_type": "structured",
+  "n_samples": 200,
+  "accuracy": 0.925,
+  "macro_f1": 0.9102843984568916,
+  "ece": 0.23849999999999982,
+  "format_error_rate": 0.0,
+  "avg_alignment_quality": 0.6475000000000004,
+  "avg_chain_quality": 0.6500000000000005,
+  "avg_groundedness": 0.9541666666666667
+}

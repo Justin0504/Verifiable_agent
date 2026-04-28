@@ -1,0 +1,13 @@
+{
+  "benchmark": "truthfulqa",
+  "model": "Qwen2.5-7B-Instruct (zero-shot CoT)",
+  "output_type": "structured",
+  "n_samples": 400,
+  "accuracy": 0.5025,
+  "macro_f1": 0.4447505911732085,
+  "ece": 0.23450000000000035,
+  "format_error_rate": 0.4675,
+  "avg_alignment_quality": 0.0,
+  "avg_chain_quality": 0.22416666666666618,
+  "avg_groundedness": 0.0
+}

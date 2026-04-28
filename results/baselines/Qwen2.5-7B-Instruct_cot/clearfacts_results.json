@@ -1,0 +1,13 @@
+{
+  "benchmark": "clearfacts",
+  "model": "Qwen2.5-7B-Instruct (zero-shot CoT)",
+  "output_type": "structured",
+  "n_samples": 1590,
+  "accuracy": 0.5446540880503145,
+  "macro_f1": 0.5076312957548405,
+  "ece": 0.1727358490566025,
+  "format_error_rate": 0.44528301886792454,
+  "avg_alignment_quality": 0.0,
+  "avg_chain_quality": 0.3672955974842766,
+  "avg_groundedness": 0.0
+}

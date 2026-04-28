@@ -1,0 +1,33 @@
+{
+  "model": "/home/yinian/checkpoints/seva_lora2s_7b_s2/final",
+  "format": "seva_v2",
+  "results": {
+    "clearfacts": {
+      "accuracy": 0.6754716981132075,
+      "macro_f1": 0.674077299184359,
+      "ece": 0.22597484276729565,
+      "alignment_quality": 0.6335429769392025,
+      "chain_quality": 0.6039832285115313,
+      "groundedness": 0.8084643605870029,
+      "n_samples": 1590
+    },
+    "fever": {
+      "accuracy": 0.93,
+      "macro_f1": 0.9214454045561665,
+      "ece": 0.025500000000001757,
+      "alignment_quality": 0.40666666666666657,
+      "chain_quality": 0.3700000000000002,
+      "groundedness": 0.9125,
+      "n_samples": 200
+    },
+    "truthfulqa": {
+      "accuracy": 0.71,
+      "macro_f1": 0.6880965825065204,
+      "ece": 0.23999999999999755,
+      "alignment_quality": 0.3775,
+      "chain_quality": 0.3483333333333324,
+      "groundedness": 0.9475,
+      "n_samples": 400
+    }
+  }
+}

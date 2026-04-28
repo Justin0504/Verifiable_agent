@@ -1,0 +1,9 @@
+{
+  "benchmark": "fever",
+  "model": "lytang/MiniCheck-Flan-T5-Large",
+  "output_type": "binary",
+  "n_samples": 200,
+  "accuracy": 0.89,
+  "macro_f1": 0.8714352501168771,
+  "ece": 0.010000000000003229
+}

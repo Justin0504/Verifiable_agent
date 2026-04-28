@@ -1,0 +1,13 @@
+{
+  "benchmark": "scifact",
+  "model": "gpt-4o-mini",
+  "output_type": "structured",
+  "n_samples": 15,
+  "accuracy": 0.7333333333333333,
+  "macro_f1": 0.7321428571428572,
+  "ece": 0.1999999999999999,
+  "format_error_rate": 0.0,
+  "avg_alignment_quality": 0.6666666666666666,
+  "avg_chain_quality": 0.6666666666666666,
+  "avg_groundedness": 0.9
+}

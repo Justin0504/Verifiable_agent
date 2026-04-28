@@ -1,0 +1,9 @@
+{
+  "benchmark": "truthfulqa",
+  "model": "lytang/MiniCheck-Flan-T5-Large",
+  "output_type": "binary",
+  "n_samples": 400,
+  "accuracy": 0.635,
+  "macro_f1": 0.5947933723737893,
+  "ece": 0.26499999999999635
+}

@@ -1,0 +1,13 @@
+{
+  "benchmark": "halueval",
+  "model": "Qwen2.5-7B-Instruct (zero-shot CoT)",
+  "output_type": "structured",
+  "n_samples": 200,
+  "accuracy": 0.29,
+  "macro_f1": 0.2248062015503876,
+  "ece": 0.44575000000000015,
+  "format_error_rate": 0.4,
+  "avg_alignment_quality": 0.0,
+  "avg_chain_quality": 0.43333333333333374,
+  "avg_groundedness": 0.0
+}

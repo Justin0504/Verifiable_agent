@@ -1,0 +1,13 @@
+{
+  "benchmark": "fever",
+  "model": "Qwen2.5-7B-Instruct (zero-shot CoT)",
+  "output_type": "structured",
+  "n_samples": 200,
+  "accuracy": 0.89,
+  "macro_f1": 0.8650472334682862,
+  "ece": 0.058749999999999,
+  "format_error_rate": 0.08,
+  "avg_alignment_quality": 0.0,
+  "avg_chain_quality": 0.598333333333334,
+  "avg_groundedness": 0.0
+}

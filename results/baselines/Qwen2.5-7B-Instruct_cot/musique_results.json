@@ -1,0 +1,13 @@
+{
+  "benchmark": "musique",
+  "model": "Qwen2.5-7B-Instruct (zero-shot CoT)",
+  "output_type": "structured",
+  "n_samples": 10,
+  "accuracy": 0.5,
+  "macro_f1": 0.3333333333333333,
+  "ece": 0.32499999999999996,
+  "format_error_rate": 0.1,
+  "avg_alignment_quality": 0.0,
+  "avg_chain_quality": 0.4999999999999999,
+  "avg_groundedness": 0.0
+}

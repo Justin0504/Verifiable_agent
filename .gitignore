@@ -1,4 +1,4 @@
-results/
+# results/ — tracked for reproducibility
 memory/
 __pycache__/
 *.pyc
@@ -17,6 +17,5 @@ wandb/
 logs/
 .claude/
 docs/~$*
-data/attribution/*.jsonl
-data/attribution/*.parquet
 data/*.jsonl
+results/_archive/

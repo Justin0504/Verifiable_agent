@@ -1,0 +1,19 @@
+{
+  "benchmark": "clearfacts",
+  "model": "lytang/MiniCheck-Flan-T5-Large",
+  "output_type": "binary",
+  "n_samples": 1590,
+  "accuracy": 0.6830188679245283,
+  "macro_f1": 0.6828562880223397,
+  "ece": 0.21698113207548617,
+  "confusion_matrix": [
+    [
+      525,
+      372
+    ],
+    [
+      132,
+      561
+    ]
+  ]
+}

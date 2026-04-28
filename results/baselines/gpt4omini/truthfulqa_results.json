@@ -1,0 +1,13 @@
+{
+  "benchmark": "truthfulqa",
+  "model": "gpt-4o-mini",
+  "output_type": "structured",
+  "n_samples": 400,
+  "accuracy": 0.5,
+  "macro_f1": 0.48600652771709796,
+  "ece": 0.39725000000000066,
+  "format_error_rate": 0.0,
+  "avg_alignment_quality": 0.5108333333333331,
+  "avg_chain_quality": 0.5216666666666666,
+  "avg_groundedness": 0.9908333333333332
+}
