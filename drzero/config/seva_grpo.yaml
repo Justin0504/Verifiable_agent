@@ -1,0 +1,46 @@
+# SEVA v2 Process Reward GRPO Config
+# Key differences from attribution_grpo.yaml:
+#   - Uses seva_reward.py (process reward, not binary)
+#   - Longer max_response_length (512) for structured output
+#   - Higher temperature (1.2) to encourage diverse reasoning chains
+#   - Larger group size (8) for better advantage estimation
+
+hydra:
+  searchpath:
+    - file://verl/trainer/config
+
+defaults:
+  - ppo_trainer
+  - _self_
+
+custom_reward_function:
+  path: verl/custom_reward/seva_reward.py
+  name: compute_score
+
+data:
+  train_files: data/attribution/seva_grpo_train.parquet
+  val_files: data/attribution/seva_grpo_val.parquet
+  train_batch_size: 64
+  val_batch_size: 64
+  max_prompt_length: 768
+  max_response_length: 512
+  truncation: left
+  return_raw_chat: True
+  shuffle: True
+
+actor_rollout_ref:
+  hybrid_engine: True
+  rollout:
+    name: vllm
+    gpu_memory_utilization: 0.4
+    tensor_model_parallel_size: 1
+    n: 8
+    temperature: 1.2
+    top_p: 0.95
+    multi_turn:
+      enable: False
+
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+  norm_adv_by_std_in_grpo: true

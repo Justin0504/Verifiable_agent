@@ -28,18 +28,18 @@ from transformers import (
     AutoTokenizer,
     TrainingArguments,
     Trainer,
-    BitsAndBytesConfig,
+    DataCollatorForSeq2Seq,
 )
 
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-model", type=str,
-                        default="/home/yinian/models/models--Qwen--Qwen2.5-3B-Instruct/snapshots/aa8e72537993ba99e69dfaafa59ed015b17504d1")
+                        default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--train-file", type=str,
-                        default="/home/yinian/verifiable_agent/data/attribution/seva_sft_train.jsonl")
+                        default="data/attribution/seva_sft_train.jsonl")
     parser.add_argument("--output-dir", type=str,
-                        default="/home/yinian/verifiable_agent/checkpoints/seva_sft")
+                        default="checkpoints/seva_sft")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--grad-accum", type=int, default=4)
@@ -97,32 +97,43 @@ def main():
     print(f"Loaded {len(dataset)} samples")
 
     def tokenize_fn(examples):
-        texts = []
+        all_input_ids = []
+        all_labels = []
         for messages in examples["messages"]:
             text = tokenizer.apply_chat_template(messages, tokenize=False)
-            texts.append(text)
-
-        tokenized = tokenizer(
-            texts,
-            truncation=True,
-            max_length=args.max_length,
-            padding="max_length",
-            return_tensors="pt",
-        )
-        tokenized["labels"] = tokenized["input_ids"].clone()
-
-        # Mask system + user tokens (only train on assistant response)
-        for i, messages in enumerate(examples["messages"]):
-            prefix = tokenizer.apply_chat_template(
-                messages[:2], tokenize=False, add_generation_prompt=True
+            tokenized = tokenizer(
+                text, truncation=True, max_length=args.max_length
             )
-            prefix_ids = tokenizer(
-                prefix, truncation=True, max_length=args.max_length
-            )["input_ids"]
-            prefix_len = len(prefix_ids)
-            tokenized["labels"][i, :prefix_len] = -100
+            input_ids = tokenized["input_ids"]
 
-        return tokenized
+            # Mask system + user tokens (only train on assistant response)
+            # Find all non-assistant messages to build prefix
+            assistant_idx = None
+            for idx, msg in enumerate(messages):
+                if msg.get("role") == "assistant":
+                    assistant_idx = idx
+                    break
+            if assistant_idx is not None and assistant_idx > 0:
+                prefix = tokenizer.apply_chat_template(
+                    messages[:assistant_idx], tokenize=False,
+                    add_generation_prompt=True
+                )
+                prefix_ids = tokenizer(
+                    prefix, truncation=True, max_length=args.max_length
+                )["input_ids"]
+                prefix_len = len(prefix_ids)
+            else:
+                prefix_len = 0
+
+            labels = list(input_ids)
+            for j in range(min(prefix_len, len(labels))):
+                labels[j] = -100
+
+            all_input_ids.append(input_ids)
+            all_labels.append(labels)
+
+        return {"input_ids": all_input_ids, "labels": all_labels,
+                "attention_mask": [[1] * len(ids) for ids in all_input_ids]}
 
     dataset = dataset.map(
         tokenize_fn, batched=True, batch_size=32,
@@ -187,11 +198,18 @@ def main():
         **ds_args,
     )
 
+    # Dynamic padding: pad to longest in batch, not max_length
+    data_collator = DataCollatorForSeq2Seq(
+        tokenizer=tokenizer,
+        padding=True,
+        pad_to_multiple_of=8,
+    )
+
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=dataset,
-        processing_class=tokenizer,
+        data_collator=data_collator,
     )
 
     trainer.train(resume_from_checkpoint=args.resume_from)

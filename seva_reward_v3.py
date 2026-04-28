@@ -1,20 +1,22 @@
 """SEVA v3 Reward: Grounded Process Reward with Cross-Component Coherence.
 
-8 reward components (vs v2's 5):
-1. R_format     (0.10): valid JSON with normalized label
-2. R_accuracy   (0.50-0.80): correct label match
-3. R_calibration(0.10-0.25): confidence alignment
-4. R_alignment  (0.15-0.30): evidence spans ACTUALLY grounded in claim/source
-5. R_chain      (0.10-0.25): reasoning steps grounded + internally consistent
-6. R_coherence  (0.10-0.20): cross-component consistency penalties
-7. R_diagnosis  (0.05-0.15): error_type correctness for Not Attributable
-8. R_specificity(0.05-0.10): penalizes generic/templated outputs
+8 reward components (normalized to sum=1.0):
+1. R_format     : valid JSON with ALL required structured fields
+2. R_accuracy   : correct label match (weight decreases across epochs)
+3. R_calibration: confidence alignment (asymmetric: harsh penalty for wrong+confident)
+4. R_alignment  : evidence spans ACTUALLY grounded in claim/source (threshold=0.75)
+5. R_chain      : reasoning steps grounded + internally consistent
+6. R_coherence  : cross-component consistency penalties
+7. R_diagnosis  : error_type correctness for Not Attributable
+8. R_specificity: penalizes generic/templated outputs
 
 Key innovations over v2:
-- Alignment reward checks substring overlap, not just span count
+- Strict format: partial JSON (label-only) gets 0, forces full structured output
+- Alignment uses threshold=0.75 (stricter than v2's 0.6)
 - Chain reward checks step-label consistency, not just word count
 - Coherence reward penalizes self-contradictory outputs
-- Specificity reward rewards unique, claim-specific reasoning
+- Normalized weights (sum=1.0) for stable training signal
+- No boundary bonus (removed: it penalized high-accuracy groups)
 """
 
 import json
@@ -49,23 +51,32 @@ VALID_ERROR_TYPES = {
 
 
 def extract_json_from_response(text: str) -> dict | None:
-    """Extract JSON object from model response, with robust fallbacks."""
+    """Extract JSON object from model response. Strict: requires structured fields.
+
+    Returns None (reward=0) if:
+    - No valid JSON found
+    - Missing required fields (label, confidence, evidence_alignment, reasoning_chain)
+    This forces the model to produce full structured output, not just label+confidence.
+    """
     text = text.strip()
     start = text.find("{")
     end = text.rfind("}") + 1
     if start != -1 and end > 0:
         try:
-            return json.loads(text[start:end])
+            parsed = json.loads(text[start:end])
         except json.JSONDecodeError:
-            pass
-    # Fallback: regex extraction for flat fields
-    label_match = re.search(r'"label"\s*:\s*"([^"]+)"', text, re.IGNORECASE)
-    conf_match = re.search(r'"confidence"\s*:\s*([\d.]+)', text)
-    if label_match:
-        return {
-            "label": label_match.group(1),
-            "confidence": float(conf_match.group(1)) if conf_match else 0.5,
-        }
+            return None
+        # Require all structured fields for full reward
+        required = {"label", "confidence", "evidence_alignment", "reasoning_chain"}
+        if required.issubset(parsed.keys()):
+            return parsed
+        # Partial output: only label+confidence → heavily penalized via format score
+        if "label" in parsed:
+            parsed.setdefault("evidence_alignment", [])
+            parsed.setdefault("reasoning_chain", [])
+            parsed.setdefault("confidence", 0.5)
+            parsed["_partial"] = True  # Flag for format scoring
+            return parsed
     return None
 
 
@@ -90,11 +101,12 @@ def _normalize_text(t: str) -> str:
     return " ".join(t.lower().split())
 
 
-def _span_overlap(span: str, text: str, threshold: float = 0.6) -> float:
+def _span_overlap(span: str, text: str, threshold: float = 0.75) -> float:
     """Check if span appears in text. Returns overlap score 0-1.
 
-    Uses substring match first (fast), falls back to SequenceMatcher
-    for paraphrased spans.
+    Uses substring match first (fast), falls back to SequenceMatcher.
+    Threshold 0.75 (stricter than v2's 0.6) — forces near-exact span extraction.
+    Below threshold: sliding penalty instead of hard cutoff.
     """
     if not span or not text:
         return 0.0
@@ -108,7 +120,6 @@ def _span_overlap(span: str, text: str, threshold: float = 0.6) -> float:
     # Fuzzy: find best matching window
     if len(span_n) > len(text_n):
         return 0.0
-    # Sliding window SequenceMatcher (only for short spans)
     if len(span_n) > 200:
         span_n = span_n[:200]
     ratio = SequenceMatcher(None, span_n, text_n).ratio()
@@ -121,7 +132,12 @@ def _span_overlap(span: str, text: str, threshold: float = 0.6) -> float:
             r = SequenceMatcher(None, span_n, chunk).ratio()
             best = max(best, r)
         ratio = max(ratio, best)
-    return ratio if ratio >= threshold else 0.0
+    # Sliding penalty: full credit >= 0.75, partial 0.5-0.75, zero below 0.5
+    if ratio >= threshold:
+        return ratio
+    elif ratio >= 0.5:
+        return ratio * 0.4  # Heavily penalize mediocre matches
+    return 0.0
 
 
 # ---------------------------------------------------------------------------
@@ -131,19 +147,21 @@ def _span_overlap(span: str, text: str, threshold: float = 0.6) -> float:
 def get_reward_weights(epoch: int = 1, total_epochs: int = 5) -> dict:
     """Dynamic weights: accuracy-heavy early, grounding-heavy late.
 
-    Total max reward ≈ 1.2-1.65 (normalized by caller if needed).
+    All weights are normalized to sum=1.0 for stable GRPO signal.
     """
     p = min((epoch - 1) / max(total_epochs - 1, 1), 1.0)
-    return {
+    raw = {
         "format":      0.10,
-        "accuracy":    0.80 - 0.30 * p,   # 0.80 → 0.50
-        "calibration": 0.10 + 0.15 * p,   # 0.10 → 0.25
-        "alignment":   0.15 + 0.15 * p,   # 0.15 → 0.30
-        "chain":       0.10 + 0.15 * p,   # 0.10 → 0.25
-        "coherence":   0.10 + 0.10 * p,   # 0.10 → 0.20
-        "diagnosis":   0.05 + 0.10 * p,   # 0.05 → 0.15
-        "specificity": 0.05 + 0.05 * p,   # 0.05 → 0.10
+        "accuracy":    0.55 - 0.20 * p,   # 0.55 → 0.35
+        "calibration": 0.05 + 0.10 * p,   # 0.05 → 0.15
+        "alignment":   0.10 + 0.10 * p,   # 0.10 → 0.20
+        "chain":       0.08 + 0.07 * p,   # 0.08 → 0.15
+        "coherence":   0.05 + 0.03 * p,   # 0.05 → 0.08
+        "diagnosis":   0.04 + 0.03 * p,   # 0.04 → 0.07
+        "specificity": 0.03 + 0.02 * p,   # 0.03 → 0.05 (lowest — informational)
     }
+    total = sum(raw.values())
+    return {k: v / total for k, v in raw.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -426,18 +444,25 @@ def compute_score(data_source: str, solution_str: str, ground_truth: dict,
     if pred_label is None:
         return 0.0
 
-    r_format = w["format"]
+    # Partial JSON (label-only, missing structured fields) → heavy penalty
+    if parsed.get("_partial"):
+        r_format = w["format"] * 0.2  # 80% format penalty
+    else:
+        r_format = w["format"]
 
     # === Component 2: Accuracy ===
     correct = (pred_label == gold_label)
     r_accuracy = w["accuracy"] if correct else 0.0
 
-    # === Component 3: Calibration ===
+    # === Component 3: Calibration (asymmetric) ===
     confidence = min(max(parsed.get("confidence", 0.5), 0.0), 1.0)
     if correct:
-        r_calibration = w["calibration"] * confidence
+        # Reward confidence, but optimal around 0.8 (not overconfident)
+        cal_error = abs(confidence - 0.85)
+        r_calibration = w["calibration"] * max(0.0, 1.0 - 1.5 * cal_error)
     else:
-        r_calibration = -w["calibration"] * confidence
+        # Harsh penalty for wrong + confident (2x weight)
+        r_calibration = -w["calibration"] * confidence * 2.0
 
     # === Component 4: Alignment grounding ===
     r_alignment = w["alignment"] * _r_alignment(parsed, claim, source)
@@ -462,41 +487,16 @@ def compute_score(data_source: str, solution_str: str, ground_truth: dict,
     return max(total, 0.0)
 
 
-def apply_boundary_bonus(scores: list[float], group_size: int = 5) -> list[float]:
-    """Group-level boundary-optimal weighting (Dr.Zero).
-
-    v3: uses softer scaling (0.6 + 0.4 * boundary) to preserve more
-    signal from easy/hard groups.
-    """
-    if len(scores) < group_size:
-        return scores
-
-    bonused = []
-    for i in range(0, len(scores), group_size):
-        group = scores[i:i + group_size]
-        correct_count = sum(1 for s in group if s > 0.5)
-        correct_rate = correct_count / len(group)
-        boundary = 1.0 - abs(correct_rate - 0.5) * 2.0
-        scale = 0.6 + 0.4 * boundary
-        for s in group:
-            bonused.append(s * scale)
-
-    remainder = len(scores) % group_size
-    if remainder > 0:
-        bonused.extend(scores[-remainder:])
-
-    return bonused
-
-
 def compute_score_batch(data_sources, solution_strs, ground_truths,
                         extra_infos, **kwargs):
-    """Batch reward computation (veRL NaiveRewardManager compatible)."""
+    """Batch reward computation (veRL NaiveRewardManager compatible).
+
+    No boundary bonus — it penalized high-accuracy groups (perverse incentive).
+    GRPO's group-relative advantage estimation already handles normalization.
+    """
     scores = []
     for ds, sol, gt, ei in zip(data_sources, solution_strs,
                                 ground_truths, extra_infos):
         score = compute_score(ds, sol, gt, ei)
         scores.append(score)
-
-    group_size = kwargs.get("group_size", 5)
-    scores = apply_boundary_bonus(scores, group_size=group_size)
     return scores

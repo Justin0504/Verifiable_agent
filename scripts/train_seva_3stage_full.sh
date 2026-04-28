@@ -7,24 +7,32 @@
 #SBATCH --mem=240g
 #SBATCH --time=48:00:00
 #SBATCH --account=bfsl-delta-gpu
-#SBATCH --output=/scratch/bfsl/ayuan/logs/seva_v3_full_%j.log
+#SBATCH --output=logs/seva_v3_full_%j.log
 
 # SEVA v3: 3-Stage FULL FINE-TUNING Pipeline (no LoRA)
 # Stage 1: Binary NLI pretraining (59K, 1 epoch, full params)
 # Stage 2: Structured SFT (5K, 3 epochs, full params)
 # Stage 3: GRPO with v3 process reward (4 GPU)
 #
-# Requires: 4x A40 (48GB each) for 7B full fine-tuning with DeepSpeed ZeRO-3
+# Requires: 4x A100 80GB (or 4x A40 48GB with DeepSpeed ZeRO-3)
+#
+# Usage:
+#   export BASE_MODEL="Qwen/Qwen2.5-7B-Instruct"
+#   export CUDA_VISIBLE_DEVICES=0,1,2,3
+#   bash scripts/train_seva_3stage_full.sh
 
 set -euo pipefail
 
-cd /scratch/bfsl/ayuan/Verifiable_agent
+# Auto-detect repo root (works from any directory)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(dirname "$SCRIPT_DIR")"
+cd "$REPO_DIR"
 
-BASE_MODEL="${BASE_MODEL:-/scratch/bfsl/ayuan/models/Qwen2.5-7B-Instruct}"
-DATA_DIR="${DATA_DIR:-/scratch/bfsl/ayuan/Verifiable_agent/data/attribution}"
-CKPT_DIR="${CKPT_DIR:-/scratch/bfsl/ayuan/checkpoints/seva_v3_full_7b}"
+BASE_MODEL="${BASE_MODEL:-Qwen/Qwen2.5-7B-Instruct}"
+DATA_DIR="${DATA_DIR:-$REPO_DIR/data/attribution}"
+CKPT_DIR="${CKPT_DIR:-$REPO_DIR/checkpoints/seva_v3_full_7b}"
 
-mkdir -p "$CKPT_DIR" /scratch/bfsl/ayuan/logs
+mkdir -p "$CKPT_DIR" logs
 
 echo "============================================="
 echo "SEVA v3 FULL Fine-Tuning (7B, 4x A40)"
@@ -106,7 +114,14 @@ if [ ! -f "$GRPO_DATA" ]; then
     echo "Evaluate Stage 2 instead"
     FINAL_MODEL="$STAGE2_OUT/final"
 else
-    export SEVA_REWARD_MODULE="seva_reward_v3"
+    # Copy v3 reward into verl's custom_reward directory
+    cp "$REPO_DIR/seva_reward_v3.py" "$REPO_DIR/drzero/verl/custom_reward/seva_reward_v3.py"
+
+    # Patch config to use v3 reward directly
+    sed -i.bak 's|verl/custom_reward/seva_reward.py|verl/custom_reward/seva_reward_v3.py|' \
+        "$REPO_DIR/drzero/config/seva_grpo.yaml" 2>/dev/null || \
+    sed -i '' 's|verl/custom_reward/seva_reward.py|verl/custom_reward/seva_reward_v3.py|' \
+        "$REPO_DIR/drzero/config/seva_grpo.yaml"
 
     source /usr/local/anaconda3/etc/profile.d/conda.sh 2>/dev/null || true
     conda activate verl 2>/dev/null || true
@@ -116,11 +131,12 @@ else
     python -m verl.trainer.main_ppo \
         --config-name='seva_grpo' \
         data.train_files="$GRPO_DATA" \
+        data.val_files="$DATA_DIR/seva_grpo_val.parquet" \
         data.train_batch_size=64 \
         data.max_prompt_length=768 \
         data.max_response_length=512 \
         data.truncation=left \
-        algorithm.use_kl_in_reward=False \
+        algorithm.kl_ctrl.kl_coef=0.02 \
         algorithm.adv_estimator=grpo \
         actor_rollout_ref.model.path="$STAGE2_OUT/final" \
         actor_rollout_ref.model.trust_remote_code=True \
@@ -132,13 +148,15 @@ else
         actor_rollout_ref.actor.fsdp_config.param_offload=False \
         actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
         actor_rollout_ref.model.enable_gradient_checkpointing=True \
-        actor_rollout_ref.rollout.n=8 \
+        actor_rollout_ref.rollout.n=16 \
         actor_rollout_ref.rollout.name=vllm \
+        actor_rollout_ref.rollout.temperature=0.8 \
+        actor_rollout_ref.rollout.top_p=0.9 \
         actor_rollout_ref.rollout.gpu_memory_utilization=0.25 \
         actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
         actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
         actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
-        actor_rollout_ref.actor.use_kl_loss=False \
+        actor_rollout_ref.actor.use_kl_loss=True \
         trainer.logger='["console"]' \
         trainer.project_name="seva-v3-full" \
         trainer.experiment_name="seva_v3_full_7b_grpo" \
@@ -162,8 +180,8 @@ echo ""
 echo "=== FINAL EVALUATION ==="
 echo "=== Started at $(date) ==="
 
-export DATA_DIR="$DATA_DIR"
-export RESULTS_DIR="$CKPT_DIR/results"
+export DATA_DIR="${DATA_DIR}"
+export RESULTS_DIR="${CKPT_DIR}/results"
 python3 -u scripts/eval_seva.py \
     --model "${FINAL_MODEL:-$STAGE2_OUT/final}" \
     --benchmarks clearfacts fever truthfulqa \

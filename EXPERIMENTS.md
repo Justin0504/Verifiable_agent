@@ -198,8 +198,8 @@ Verifiable_agent/
 
 #### `drzero/config/seva_grpo.yaml` — GRPO config
 - Hydra config for veRL, extends `ppo_trainer` defaults
-- Default reward path points to v2; overridden at runtime via `SEVA_REWARD_MODULE=seva_reward_v3`
-- Rollout settings: temperature=1.2, top_p=0.95, n=8 (8 rollouts per prompt)
+- The `train_seva_3stage_full.sh` script auto-patches this to use v3 reward and copies `seva_reward_v3.py` into the correct directory
+- Rollout settings: temperature=0.8, top_p=0.9, n=16 (16 rollouts per prompt)
 
 ---
 
@@ -241,28 +241,32 @@ Verifiable_agent/
 
 **How it works**:
 1. Load Stage 2 checkpoint as both actor and reference model
-2. For each prompt, generate 8 rollouts via vLLM (temperature=1.2 for diversity)
-3. Score each rollout with the 8-component reward function
-4. GRPO advantage estimation: compare within each group of 8 rollouts
-5. PPO loss updates the actor model (reference model stays frozen)
+2. For each prompt, generate 16 rollouts via vLLM (temperature=0.8, moderate diversity)
+3. Score each rollout with the 8-component reward function (normalized weights, sum=1.0)
+4. GRPO advantage estimation: compare within each group of 16 rollouts
+5. PPO loss with light KL penalty (kl_coef=0.02) updates the actor model
 
-**8-component reward function**:
+**8-component reward function** (weights normalized to sum=1.0):
 
 | Component | Weight (epoch 1 -> 5) | What it does |
 |-----------|----------------------|--------------|
-| R_format | 0.10 (fixed) | Checks valid JSON with required fields: label, confidence, evidence_alignment, reasoning_chain |
-| R_accuracy | 0.80 -> 0.50 | Binary: correct label match. High weight early (learn accuracy first), decreases later to let grounding improve |
-| R_calibration | 0.10 -> 0.25 | Confidence alignment: correct + high confidence = positive reward; wrong + high confidence = negative reward |
-| R_alignment | 0.15 -> 0.30 | Checks if evidence spans actually appear in claim/source text. Uses SequenceMatcher fuzzy matching (threshold=0.6) |
-| R_chain | 0.10 -> 0.25 | Reasoning step quality: substantive content (>10 chars), consistent with label, optimal at 2-4 steps |
-| R_coherence | 0.10 -> 0.20 | Cross-component consistency: label vs error_type, label vs alignment status, label vs chain judgments |
-| R_diagnosis | 0.05 -> 0.15 | Error type correctness + fix_suggestion quality (only applies to "Not Attributable" predictions) |
-| R_specificity | 0.05 -> 0.10 | Penalizes generic/templated outputs, rewards referencing specific claim content |
+| R_format | ~0.10 | **Strict**: requires all 4 fields (label, confidence, evidence_alignment, reasoning_chain). Partial JSON gets 80% penalty |
+| R_accuracy | ~0.55 -> 0.35 | Correct label match. High weight early, decreases to let grounding improve |
+| R_calibration | ~0.05 -> 0.15 | **Asymmetric**: optimal confidence ~0.85 for correct; 2x penalty for wrong+confident |
+| R_alignment | ~0.10 -> 0.20 | Evidence spans grounded in claim/source. **Strict threshold=0.75** with sliding penalty below |
+| R_chain | ~0.08 -> 0.15 | Reasoning step quality: substantive content (>10 chars), consistent with label, 2-4 steps optimal |
+| R_coherence | ~0.05 -> 0.08 | Cross-component consistency: label vs error_type, alignment status, chain judgments |
+| R_diagnosis | ~0.04 -> 0.07 | Error type correctness + fix_suggestion quality (only for "Not Attributable") |
+| R_specificity | ~0.03 -> 0.05 | Penalizes generic/templated outputs, rewards referencing specific claim content |
 
 **Key design decisions**:
-- **Dynamic weights**: accuracy weight 80% -> 50% across epochs, so grounding components gradually take over. The model needs to learn correct classification first, then improve reasoning quality
-- **Boundary bonus**: groups with ~50% correct rate get higher weight (most informative for learning)
-- **All grounding checks use fuzzy matching** (threshold=0.6): tolerates minor text variations in model-generated spans
+- **Strict format reward**: partial JSON (label-only without structured fields) gets near-zero reward. Forces model to produce full structured output
+- **Normalized weights** (sum=1.0): stable reward signal across epochs. No more total-reward drift
+- **No boundary bonus**: removed because it penalized high-accuracy groups (perverse incentive). GRPO's group-relative advantage estimation already normalizes
+- **Stricter span matching** (threshold=0.75): forces near-exact span extraction, not fuzzy paraphrasing. Sliding penalty between 0.5-0.75
+- **KL penalty** (kl_coef=0.02): light regularization prevents reward hacking while allowing improvement
+- **16 rollouts** (up from 8): better advantage estimation for 7B model on sparse reward
+- **Temperature 0.8** (down from 1.2): structured JSON needs more coherent outputs
 
 **Framework**: veRL 0.3 (Ray + FSDP + vLLM)
 - vLLM handles rollout generation (fast sampling)
@@ -289,16 +293,13 @@ export CUDA_VISIBLE_DEVICES=0,1,2,3
 bash scripts/train_seva_3stage_full.sh
 ```
 
-**Before running, modify `train_seva_3stage_full.sh`**:
-1. Line 22: change `cd /scratch/bfsl/ayuan/Verifiable_agent` to your repo path
-2. Lines 23-25: change default paths to your environment (or override with env vars above)
-3. The `#SBATCH` headers at the top are for SLURM clusters; ignore if running directly
-
 The script automatically:
+- Detects its own repo directory (no hardcoded paths to edit)
 - Detects completed stages (checks for `final/` directory), skips if already done
 - Configures DeepSpeed ZeRO-3 for Stage 1/2
-- Runs veRL GRPO for Stage 3
+- Copies v3 reward function + patches GRPO config for Stage 3
 - Runs final evaluation and saves results
+- The `#SBATCH` headers at the top are for SLURM clusters; ignored when running directly with `bash`
 
 ### Option B: Run stages manually
 
@@ -362,11 +363,11 @@ python3 -u scripts/eval_seva.py \
 #### Stage 3: GRPO
 
 ```bash
-# Setup: copy reward function into verl's custom_reward directory
+# Setup: copy v3 reward into verl directory + patch config
 cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py
+sed -i 's|verl/custom_reward/seva_reward.py|verl/custom_reward/seva_reward_v3.py|' drzero/config/seva_grpo.yaml
+# (on macOS, use: sed -i '' 's|...|...|' ...)
 
-# Set environment
-export SEVA_REWARD_MODULE="seva_reward_v3"
 export DATA_DIR="$(pwd)/data/attribution"
 
 python -m verl.trainer.main_ppo \
@@ -377,7 +378,7 @@ python -m verl.trainer.main_ppo \
     data.max_prompt_length=768 \
     data.max_response_length=512 \
     data.truncation=left \
-    algorithm.use_kl_in_reward=False \
+    algorithm.kl_ctrl.kl_coef=0.02 \
     algorithm.adv_estimator=grpo \
     actor_rollout_ref.model.path="checkpoints/seva_v3_7b/stage2_structured/final" \
     actor_rollout_ref.model.trust_remote_code=True \
@@ -389,13 +390,15 @@ python -m verl.trainer.main_ppo \
     actor_rollout_ref.actor.fsdp_config.param_offload=False \
     actor_rollout_ref.actor.fsdp_config.optimizer_offload=True \
     actor_rollout_ref.model.enable_gradient_checkpointing=True \
-    actor_rollout_ref.rollout.n=8 \
+    actor_rollout_ref.rollout.n=16 \
     actor_rollout_ref.rollout.name=vllm \
+    actor_rollout_ref.rollout.temperature=0.8 \
+    actor_rollout_ref.rollout.top_p=0.9 \
     actor_rollout_ref.rollout.gpu_memory_utilization=0.25 \
     actor_rollout_ref.rollout.tensor_model_parallel_size=2 \
     actor_rollout_ref.rollout.log_prob_micro_batch_size_per_gpu=1 \
     actor_rollout_ref.ref.log_prob_micro_batch_size_per_gpu=1 \
-    actor_rollout_ref.actor.use_kl_loss=False \
+    actor_rollout_ref.actor.use_kl_loss=True \
     trainer.logger='["console"]' \
     trainer.project_name="seva-v3-full" \
     trainer.experiment_name="seva_v3_full_7b_grpo" \
@@ -488,13 +491,9 @@ export RESULTS_DIR="$(pwd)/results"
 
 ### GRPO config reward path
 
-`drzero/config/seva_grpo.yaml` line 16 points to `verl/custom_reward/seva_reward.py` (v2). The Stage 3 command overrides this to v3 via the `SEVA_REWARD_MODULE=seva_reward_v3` environment variable. If the env var doesn't take effect, manually edit the yaml:
-
-```yaml
-custom_reward_function:
-  path: verl/custom_reward/seva_reward_v3.py  # change this line
-  name: compute_score
-```
+The `train_seva_3stage_full.sh` script auto-patches `drzero/config/seva_grpo.yaml` to use v3 reward. If running Stage 3 manually, make sure to:
+1. Copy the reward file: `cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py`
+2. Patch the config: `sed -i 's|seva_reward.py|seva_reward_v3.py|' drzero/config/seva_grpo.yaml`
 
 ---
 
