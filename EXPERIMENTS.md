@@ -111,6 +111,7 @@ All data is in `data/attribution/`, included in the repo.
 | `clearfacts.jsonl` | 1,590 | Primary benchmark: claim-source attribution |
 | `fever.jsonl` | 200 | Fact verification (3-class remapped to binary) |
 | `truthfulqa.jsonl` | 400 | Truthfulness detection |
+| `halueval.jsonl` | 200 | LLM hallucination detection (from HaluEval QA, 100 attr + 100 not attr) |
 
 ### Data format
 
@@ -324,7 +325,7 @@ torchrun --nproc_per_node=4 --master_port=29500 \
 export DATA_DIR="$(pwd)/data/attribution"
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_7b/stage1_nli/final \
-    --benchmarks clearfacts fever \
+    --benchmarks clearfacts fever halueval \
     --output-dir results/seva_v3_full_7b_s1
 ```
 
@@ -351,7 +352,7 @@ torchrun --nproc_per_node=4 --master_port=29500 \
 # Evaluate Stage 2
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_7b/stage2_structured/final \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_s2
 ```
 
@@ -416,7 +417,7 @@ FINAL_MODEL=$(ls -d checkpoints/seva_v3_7b/stage3_grpo/global_step_* 2>/dev/null
 
 python3 -u scripts/eval_seva.py \
     --model "$FINAL_MODEL" \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_final
 ```
 
@@ -437,7 +438,7 @@ export DATA_DIR="$(pwd)/data/attribution"
 
 python3 -u scripts/eval_seva.py \
     --model /path/to/checkpoint \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/my_eval
 ```
 
@@ -511,20 +512,20 @@ export DATA_DIR="$(pwd)/data/attribution"
 # After Stage 1
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_full_7b/stage1_nli/final \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_s1
 
 # After Stage 2
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_full_7b/stage2_structured/final \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_s2
 
 # After Stage 3 (final)
 FINAL_MODEL=$(ls -d checkpoints/seva_v3_full_7b/stage3_grpo/global_step_* 2>/dev/null | sort -V | tail -1)
 python3 -u scripts/eval_seva.py \
     --model "$FINAL_MODEL" \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_final
 ```
 
@@ -583,7 +584,7 @@ torchrun --nproc_per_node=4 --master_port=29500 \
 # Evaluate
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_full_7b_ablation_single_stage/final \
-    --benchmarks clearfacts fever truthfulqa \
+    --benchmarks clearfacts fever truthfulqa halueval \
     --output-dir results/seva_v3_full_7b_ablation_single_stage
 ```
 
