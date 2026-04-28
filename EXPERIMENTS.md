@@ -497,15 +497,142 @@ The `train_seva_3stage_full.sh` script auto-patches `drzero/config/seva_grpo.yam
 
 ---
 
-## 10. Results to Send Back
+## 10. Results to Send Back (for the paper)
 
-After completing all stages, please send the following:
+The paper (ACL ARR 2026 submission) needs specific data from 7B full FT experiments. Please collect **all** of the following — each item maps to a table/figure in the paper.
 
-1. **Stage 1 eval**: `results/seva_v3_full_7b_s1/summary.json`
-2. **Stage 2 eval**: `results/seva_v3_full_7b_s2/summary.json`
-3. **Stage 3 eval**: `results/seva_v3_full_7b_final/summary.json`
-4. **Training logs**: stdout/stderr from each stage (loss curves)
-5. **If ClearFacts F1 > 0.75**: save Stage 3 final checkpoint (needed for the paper)
+### 10.1 Per-Stage Evaluation JSONs
+
+Run eval after **each** stage (not just the final one). The eval script already outputs all needed metrics.
+
+```bash
+export DATA_DIR="$(pwd)/data/attribution"
+
+# After Stage 1
+python3 -u scripts/eval_seva.py \
+    --model checkpoints/seva_v3_full_7b/stage1_nli/final \
+    --benchmarks clearfacts fever truthfulqa \
+    --output-dir results/seva_v3_full_7b_s1
+
+# After Stage 2
+python3 -u scripts/eval_seva.py \
+    --model checkpoints/seva_v3_full_7b/stage2_structured/final \
+    --benchmarks clearfacts fever truthfulqa \
+    --output-dir results/seva_v3_full_7b_s2
+
+# After Stage 3 (final)
+FINAL_MODEL=$(ls -d checkpoints/seva_v3_full_7b/stage3_grpo/global_step_* 2>/dev/null | sort -V | tail -1)
+python3 -u scripts/eval_seva.py \
+    --model "$FINAL_MODEL" \
+    --benchmarks clearfacts fever truthfulqa \
+    --output-dir results/seva_v3_full_7b_final
+```
+
+**Send these files** (9 total):
+- `results/seva_v3_full_7b_s1/summary.json` + `clearfacts_results.json`
+- `results/seva_v3_full_7b_s2/summary.json` + `clearfacts_results.json`
+- `results/seva_v3_full_7b_final/summary.json` + `clearfacts_results.json` + `fever_results.json` + `truthfulqa_results.json`
+
+Each `*_results.json` already contains:
+- `macro_f1`, `accuracy` → **Paper Table 1 (main results), Table 2 (multi-benchmark)**
+- `confusion_matrix` → **Paper Figure 5 (confusion matrix), Appendix Table 8**
+- `ece` → **Paper calibration analysis**
+- `avg_alignment_quality`, `avg_chain_quality`, `format_error_rate` → **Paper Table 4 (structured quality)**
+- `avg_groundedness` → **Paper structural metrics**
+- Per-sample `predictions` array → needed for error type distribution analysis
+
+### 10.2 Structured Quality Comparison (Paper Table 4)
+
+The paper's Table 4 compares alignment/chain/format between SFT and GRPO. We need this for 7B:
+
+| Metric | Where to find it | Paper table |
+|--------|-----------------|-------------|
+| Alignment quality (Stage 2 vs 3) | `avg_alignment_quality` in summary.json | Table 4 |
+| Chain quality (Stage 2 vs 3) | `avg_chain_quality` in summary.json | Table 4 |
+| Format error rate (Stage 2 vs 3) | `format_error_rate` in summary.json | Table 4 |
+
+### 10.3 GRPO Training Dynamics (Paper Table 11 / Figure 4)
+
+During Stage 3 GRPO, the console logs print reward statistics. **Save the full stdout log.** We need these at steps 0, 50, 100, 200, 300, final:
+- Mean reward
+- Reward std / advantage spread (min, max)
+- Entropy (if logged)
+
+```bash
+# Redirect Stage 3 output to a log file
+bash scripts/train_seva_3stage_full.sh 2>&1 | tee logs/seva_v3_full_training.log
+```
+
+### 10.4 Ablation: Single-Stage vs Two-Stage (Paper Table 6)
+
+To prove that two-stage training (Binary NLI → Structured SFT) is better than single-stage (Structured SFT only), run this **additional** experiment:
+
+```bash
+# Single-stage ablation: skip Stage 1, train structured SFT directly from base model
+torchrun --nproc_per_node=4 --master_port=29500 \
+    scripts/train_seva_sft.py \
+    --base-model Qwen/Qwen2.5-7B-Instruct \
+    --train-file data/attribution/seva_sft_train.jsonl \
+    --output-dir checkpoints/seva_v3_full_7b_ablation_single_stage \
+    --epochs 3 \
+    --batch-size 1 \
+    --grad-accum 16 \
+    --lr 2e-5 \
+    --max-length 1024
+
+# Evaluate
+python3 -u scripts/eval_seva.py \
+    --model checkpoints/seva_v3_full_7b_ablation_single_stage/final \
+    --benchmarks clearfacts fever truthfulqa \
+    --output-dir results/seva_v3_full_7b_ablation_single_stage
+```
+
+**Send**: `results/seva_v3_full_7b_ablation_single_stage/summary.json`
+
+### 10.5 Error Type Distribution (Paper Table 10)
+
+Already included in `clearfacts_results.json` per-sample predictions. We'll extract error_type counts from the JSON. No extra work needed — just make sure to send the full `clearfacts_results.json`.
+
+### 10.6 Compute Budget (Paper Table 5)
+
+Please record wall-clock time for each stage:
+
+| Stage | GPUs | Wall time | GPU-hours |
+|-------|------|-----------|-----------|
+| Stage 1 (59K, 1 epoch) | 4xA100 80G | ? | ? |
+| Stage 2 (5K, 3 epochs) | 4xA100 80G | ? | ? |
+| Stage 3 (GRPO, 5 epochs) | 4xA100 80G | ? | ? |
+| Ablation (single-stage) | 4xA100 80G | ? | ? |
+| Eval (per benchmark) | 1xA100 80G | ? | ? |
+
+### 10.7 Paper Updates Needed
+
+The current paper (paper/arr2026/acl_latex.tex) reports 3B GRPO + 7B LoRA results. Once 7B full FT results are in, these sections need updating:
+
+| Section | What to update |
+|---------|---------------|
+| Abstract | "68.6 F1" → new 7B full FT number |
+| Table 1 (main results) | Add row: "SEVA-7B Full FT + GRPO" |
+| Table 2 (multi-benchmark) | Add 7B rows across benchmarks |
+| Table 4 (structural quality) | Add 7B alignment/chain/format |
+| Table 6 (scaling) | Add 7B full FT row, remove "partially substitutable" caveat if GRPO helps |
+| Table 7 (ablation) | Add 7B ablation rows |
+| Table 5 (compute) | Add 7B full FT + GRPO GPU hours |
+| Table 9 (GRPO hyperparams) | Update: G=16, temp=0.8, kl=0.02 (currently shows 3B: G=8, temp=1.2, kl=0.001) |
+| Discussion | Update "7B full FT is future work" → actual results |
+| Limitations | Remove "7B uses LoRA" limitation |
+
+### Summary checklist
+
+| # | Item | Priority |
+|---|------|----------|
+| 1 | Stage 1 eval (clearfacts, fever, truthfulqa) | High |
+| 2 | Stage 2 eval (clearfacts, fever, truthfulqa) | High |
+| 3 | Stage 3 eval (clearfacts, fever, truthfulqa) | **Critical** |
+| 4 | Full training log (stdout with GRPO dynamics) | High |
+| 5 | Single-stage ablation eval | Medium |
+| 6 | Wall-clock times per stage | Medium |
+| 7 | Final checkpoint (if ClearFacts F1 > 0.75) | High |
 
 ### Success criteria
 
@@ -514,6 +641,9 @@ After completing all stages, please send the following:
 | ClearFacts F1 | 0.674 | 0.75+ | **0.81+** |
 | FEVER F1 | 0.921 | 0.94+ | 0.95+ |
 | TruthfulQA F1 | 0.688 | 0.80+ | 0.83+ |
+| Alignment quality | 0.917 (3B SFT) | 0.99+ | 0.99+ |
+| Chain quality | 0.917 (3B SFT) | 0.99+ | 0.99+ |
+| Format error rate | 28% (3B SFT) | <1% | <1% |
 
 ---
 
