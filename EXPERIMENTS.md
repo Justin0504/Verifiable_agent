@@ -65,20 +65,30 @@ Run evaluation after each stage (see Section 7).
 ### Install dependencies
 
 ```bash
-# Core
-pip install torch>=2.1 transformers>=4.40 accelerate datasets peft
-pip install deepspeed  # multi-GPU SFT (Stage 1 & 2)
-pip install scikit-learn pandas numpy  # evaluation
-
-# Stage 3 GRPO (must use these exact versions)
-pip install vllm==0.6.3
-pip install verl==0.3.0.post1
-pip install flash-attn  # optional but recommended
-
-# Clone repo
+# Clone repo first
 git clone https://github.com/Justin0504/Verifiable_agent.git
 cd Verifiable_agent
+
+# Install all dependencies (order matters: torch first, then vllm, then verl)
+pip install torch>=2.1,<2.6 transformers>=4.40 accelerate datasets peft
+pip install deepspeed>=0.14        # multi-GPU SFT (Stage 1 & 2)
+pip install vllm==0.6.3            # MUST install before verl
+pip install verl==0.3.0.post1      # GRPO framework
+pip install ray>=2.0.0             # required by verl
+pip install scikit-learn pandas numpy  # evaluation
+
+# flash-attn: REQUIRED for Stage 3 GRPO (compile from source, takes ~10 min)
+pip install flash-attn --no-build-isolation
+
+# Or install everything at once:
+# pip install -r requirements.txt && pip install flash-attn --no-build-isolation
 ```
+
+> **Important install notes:**
+> - Install `torch` before `vllm` (vllm builds against torch's CUDA version)
+> - Install `vllm==0.6.3` before `verl==0.3.0.post1` (verl checks vllm API)
+> - `flash-attn` must be installed separately (requires CUDA toolkit for compilation)
+> - If `flash-attn` install fails: ensure `CUDA_HOME` is set and `nvcc --version` works
 
 ### Version compatibility (important)
 
@@ -281,17 +291,13 @@ Verifiable_agent/
 ### Option A: One-click script (recommended)
 
 ```bash
-# Setup: copy reward function into verl's custom_reward directory (needed for Stage 3)
-cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py
-
-# Set environment variables
-export BASE_MODEL="Qwen/Qwen2.5-7B-Instruct"  # or local path
-export DATA_DIR="$(pwd)/data/attribution"
-export CKPT_DIR="$(pwd)/checkpoints/seva_v3_full_7b"
+# Set environment variables (optional — all have sensible defaults)
+export BASE_MODEL="Qwen/Qwen2.5-7B-Instruct"  # or local path if already downloaded
 export CUDA_VISIBLE_DEVICES=0,1,2,3
+export NUM_GPUS=4  # default: 4
 
-# Run all 3 stages + final evaluation
-bash scripts/train_seva_3stage_full.sh
+# Run all 3 stages + final evaluation (save full log for paper)
+bash scripts/train_seva_3stage_full.sh 2>&1 | tee logs/seva_v3_full_training.log
 ```
 
 The script automatically:
@@ -364,24 +370,27 @@ python3 -u scripts/eval_seva.py \
 #### Stage 3: GRPO
 
 ```bash
-# Setup: copy v3 reward into verl directory + patch config
+# Setup: copy v3 reward into verl directory + patch config (from repo root)
 cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py
-sed -i 's|verl/custom_reward/seva_reward.py|verl/custom_reward/seva_reward_v3.py|' drzero/config/seva_grpo.yaml
-# (on macOS, use: sed -i '' 's|...|...|' ...)
+sed -i 's|verl/custom_reward/seva_reward\.py|verl/custom_reward/seva_reward_v3.py|' drzero/config/seva_grpo.yaml
 
-export DATA_DIR="$(pwd)/data/attribution"
+# IMPORTANT: Stage 3 must run from the drzero/ directory
+# so that Hydra finds seva_grpo.yaml and verl resolves to local copy
+cd drzero
+REPO_ROOT="$(dirname "$(pwd)")"
 
-python -m verl.trainer.main_ppo \
+PYTHONPATH="." python -m verl.trainer.main_ppo \
+    --config-path=config \
     --config-name='seva_grpo' \
-    data.train_files="data/attribution/seva_grpo_train.parquet" \
-    data.val_files="data/attribution/seva_grpo_val.parquet" \
+    data.train_files="$REPO_ROOT/data/attribution/seva_grpo_train.parquet" \
+    data.val_files="$REPO_ROOT/data/attribution/seva_grpo_val.parquet" \
     data.train_batch_size=64 \
     data.max_prompt_length=768 \
     data.max_response_length=512 \
     data.truncation=left \
     algorithm.kl_ctrl.kl_coef=0.02 \
     algorithm.adv_estimator=grpo \
-    actor_rollout_ref.model.path="checkpoints/seva_v3_7b/stage2_structured/final" \
+    actor_rollout_ref.model.path="$REPO_ROOT/checkpoints/seva_v3_7b/stage2_structured/final" \
     actor_rollout_ref.model.trust_remote_code=True \
     actor_rollout_ref.actor.grad_clip=0.1 \
     actor_rollout_ref.actor.optim.lr=1e-6 \
@@ -409,6 +418,8 @@ python -m verl.trainer.main_ppo \
     trainer.test_freq=20 \
     trainer.val_before_train=True \
     trainer.total_epochs=5
+
+cd "$REPO_ROOT"  # return to repo root for eval
 ```
 
 ```bash
@@ -472,23 +483,18 @@ results/my_eval/
 
 | Problem | Solution |
 |---------|----------|
+| **flash-attn install fails** | Ensure `CUDA_HOME` is set: `export CUDA_HOME=/usr/local/cuda`. Also needs `python3-dev` and `ninja`: `pip install ninja` |
+| **`ModuleNotFoundError: verl`** (Stage 3) | Must run from `drzero/` dir with `PYTHONPATH=.`. The one-click script handles this automatically |
+| **Hydra can't find seva_grpo.yaml** | Pass `--config-path=config` when running from `drzero/`. The one-click script handles this |
 | **Qwen2.5 rope_scaling "default" type** | vLLM 0.6.3 doesn't recognize it. Patch `vllm/model_executor/layers/rotary_embedding.py` to treat `"default"` as standard RoPE |
 | **AutoModelForVision2Seq import error** | transformers 5.x removed this class. Add try/except in `verl/workers/fsdp_workers.py` |
 | **OOM on single GPU** | Use `--optim-8bit` (Adafactor, ~31GB peak) + `--max-length 512` |
 | **DeepSpeed CPU Adam compile failure** | Missing `python3-dev` headers. The script already sets `offload_optimizer.device="none"` automatically |
 | **veRL import errors (torch 2.6+)** | Do not use veRL 0.7+. Pin `verl==0.3.0.post1` + `torch<2.6` |
 | **vLLM port 8000 already in use** | `kill -9 $(lsof -t -i :8000)` |
-| **eval_seva.py "file not found"** | Set `export DATA_DIR="$(pwd)/data/attribution"` |
+| **eval_seva.py "file not found"** | eval_seva.py now auto-detects data dir relative to repo root. If it still fails, set `export DATA_DIR="$(pwd)/data/attribution"` |
 | **GRPO NaN rewards** | Model is outputting non-JSON. Stage 2 may not have trained properly |
-
-### Hardcoded paths to fix
-
-`scripts/eval_seva.py` lines 44-45 have hardcoded dev server paths for DATA_DIR and RESULTS_DIR. **Always** override via environment variables:
-
-```bash
-export DATA_DIR="$(pwd)/data/attribution"
-export RESULTS_DIR="$(pwd)/results"
-```
+| **Stage 1/2 no DeepSpeed (single GPU)** | The script uses `torchrun --nproc_per_node=4`. If you have fewer GPUs, change `NUM_GPUS=2` or use `--optim-8bit` for single GPU |
 
 ### GRPO config reward path
 

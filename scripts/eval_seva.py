@@ -41,8 +41,9 @@ from seva_reward import (
 # ============================================================
 # Config
 # ============================================================
-DATA_DIR = Path(os.environ.get("DATA_DIR", "/home/yinian/verifiable_agent/data/attribution"))
-RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", "/home/yinian/verifiable_agent/results/seva_eval"))
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+DATA_DIR = Path(os.environ.get("DATA_DIR", str(_REPO_ROOT / "data" / "attribution")))
+RESULTS_DIR = Path(os.environ.get("RESULTS_DIR", str(_REPO_ROOT / "results" / "seva_eval")))
 
 
 # ============================================================

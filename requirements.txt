@@ -9,6 +9,7 @@ deepspeed>=0.14
 # GRPO (Stage 3) — pin exact versions for veRL compatibility
 vllm==0.6.3
 verl==0.3.0.post1
+ray>=2.0.0
 
 # Evaluation & data
 scikit-learn>=1.4.0
@@ -26,5 +27,5 @@ rich>=13.0.0
 matplotlib>=3.8.0
 seaborn>=0.13.0
 
-# Optional
-# flash-attn  # install separately: pip install flash-attn --no-build-isolation
+# Required for Stage 3 GRPO (install separately due to CUDA compilation)
+# pip install flash-attn --no-build-isolation
