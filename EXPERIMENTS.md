@@ -1,40 +1,38 @@
 # SEVA v3: 7B Full Fine-Tuning Experiment Guide
 
-> **给协作者的说明**：这个文档是自包含的实验复现指南。你可以把整个 repo 克隆到有 4xA100 80GB 的机器上，按下面的步骤跑完全部实验。所有训练数据、评估数据、代码都在 repo 里，不需要额外下载。
->
-> **For collaborators**: This is a self-contained experiment reproduction guide. Clone this repo to a machine with 4xA100 80GB GPUs and follow the steps below. All training data, eval data, and code are included.
+> **For collaborators**: This is a self-contained experiment reproduction guide. Clone this repo onto a machine with 4xA100 80GB GPUs and follow the steps below. All training data, eval data, and code are included in the repo — no extra downloads needed.
 
 ---
 
-## 1. What We Need to Run (待跑实验)
+## 1. Experiments to Run
 
-我们之前用 LoRA 跑的 7B 最好成绩是 ClearFacts F1=0.674。目标是 **81+ F1**（匹配 MiniCheck-7B）。
+Our best 7B result so far used LoRA and reached ClearFacts F1=0.674. The target is **81+ F1** (matching MiniCheck-7B from the VtV paper).
 
-**核心假设**：LoRA 的参数容量不足以学好结构化输出 -> 改用全量微调。GRPO 在 3B 上证明有效（+4 F1）-> 在 7B 上应该更大提升。
+**Core hypothesis**: LoRA lacks the capacity to learn structured output well. Switching to full-parameter fine-tuning removes this bottleneck. GRPO is proven effective on 3B (+4 F1 points), and should yield even larger gains on 7B.
 
-### 需要跑的 3 个实验（按顺序）：
+### Three stages (run in order):
 
-| 实验 | 说明 | 预计时间 | 产出 |
-|------|------|----------|------|
-| **Stage 1: Binary NLI** | 59K 样本，1 epoch，全量微调 | ~4h on 4xA100 | `checkpoints/seva_v3_7b/stage1_nli/final/` |
-| **Stage 2: Structured SFT** | 5K 样本，3 epochs，全量微调 | ~1h on 4xA100 | `checkpoints/seva_v3_7b/stage2_structured/final/` |
-| **Stage 3: GRPO** | 64K prompts，5 epochs，8-component reward | ~8-12h on 4xA100 | `checkpoints/seva_v3_7b/stage3_grpo/` |
+| Stage | Description | Est. Time | Output |
+|-------|-------------|-----------|--------|
+| **Stage 1: Binary NLI** | 59K samples, 1 epoch, full fine-tuning | ~4h on 4xA100 | `checkpoints/seva_v3_7b/stage1_nli/final/` |
+| **Stage 2: Structured SFT** | 5K samples, 3 epochs, full fine-tuning | ~1h on 4xA100 | `checkpoints/seva_v3_7b/stage2_structured/final/` |
+| **Stage 3: GRPO** | 64K prompts, 5 epochs, 8-component process reward | ~8-12h on 4xA100 | `checkpoints/seva_v3_7b/stage3_grpo/` |
 
-每个 Stage 结束后需要跑一次 eval（见第 7 节）。
+Run evaluation after each stage (see Section 7).
 
 ---
 
-## 2. 已有结果（Baseline — 新实验需要超过这些）
+## 2. Existing Results (baselines to beat)
 
-### ClearFacts (N=1,590) — 主要指标
+### ClearFacts (N=1,590) — Primary metric
 
-| Model | Acc | F1 | 训练方式 |
-|-------|-----|-----|---------|
-| MiniCheck-7B (目标) | ~81% | **0.810** | Full FT on NLI data |
+| Model | Acc | F1 | Training |
+|-------|-----|-----|----------|
+| MiniCheck-7B (target) | ~81% | **0.810** | Full FT on NLI data |
 | GPT-4o-mini (structured) | 69.9% | 0.698 | Commercial API |
-| **SEVA-GRPO 3B** | 69.6% | **0.690** | Full FT + GRPO (证明 GRPO 有效) |
-| SEVA-SFT 7B LoRA-128 (单阶段) | 68.6% | 0.686 | LoRA r=128 |
-| SEVA-SFT 7B LoRA S2 (两阶段) | 67.5% | 0.674 | LoRA r=64, 两阶段 |
+| **SEVA-GRPO 3B** | 69.6% | **0.690** | Full FT + GRPO (proves GRPO works) |
+| SEVA-SFT 7B LoRA-128 (single-stage) | 68.6% | 0.686 | LoRA r=128 |
+| SEVA-SFT 7B LoRA S2 (two-stage) | 67.5% | 0.674 | LoRA r=64, two-stage |
 | SEVA-SFT 3B | 65.2% | 0.649 | Full FT |
 
 ### FEVER (N=200)
@@ -52,71 +50,71 @@
 | GRPO 3B | 82.8% | 0.827 |
 | SEVA-SFT 7B LoRA S2 | 71.0% | 0.688 |
 
-> 所有已有结果的 JSON 文件在 `results/` 目录下。
+> All existing result JSONs are in `results/`.
 
 ---
 
-## 3. 环境配置
+## 3. Environment Setup
 
-### 硬件要求
+### Hardware
 
 - **Stage 1 & 2 (SFT)**: 4xA100 80GB + DeepSpeed ZeRO-3
-- **Stage 3 (GRPO)**: 4xA100 80GB, veRL 框架 (Ray + FSDP + vLLM)
-- 单卡也能跑 Stage 1/2（用 `--optim-8bit`，峰值 ~31GB），但很慢
+- **Stage 3 (GRPO)**: 4xA100 80GB, veRL framework (Ray + FSDP + vLLM)
+- Single-GPU is possible for Stage 1/2 with `--optim-8bit` (~31GB peak), but slow
 
-### 安装依赖
+### Install dependencies
 
 ```bash
-# 基础环境
+# Core
 pip install torch>=2.1 transformers>=4.40 accelerate datasets peft
-pip install deepspeed  # Stage 1/2 多卡训练
-pip install scikit-learn pandas numpy  # 评估用
+pip install deepspeed  # multi-GPU SFT (Stage 1 & 2)
+pip install scikit-learn pandas numpy  # evaluation
 
-# Stage 3 GRPO（必须用这个版本组合）
+# Stage 3 GRPO (must use these exact versions)
 pip install vllm==0.6.3
 pip install verl==0.3.0.post1
-pip install flash-attn  # 可选但推荐
+pip install flash-attn  # optional but recommended
 
-# 克隆 repo
+# Clone repo
 git clone https://github.com/Justin0504/Verifiable_agent.git
 cd Verifiable_agent
 ```
 
-### 版本兼容性（重要）
+### Version compatibility (important)
 
-| 组件 | 要求 | 原因 |
-|------|------|------|
-| veRL | **0.3.0.post1** | 0.7+ 有 breaking changes（DTensorSpec 需要 torch 2.6+） |
-| vLLM | **0.6.3** | veRL 0.3 依赖此版本的 API |
-| torch | >=2.1, <2.6 | veRL 0.3 不兼容 torch 2.6 |
-| transformers | >=4.40 | Qwen2.5 支持 |
+| Component | Requirement | Reason |
+|-----------|-------------|--------|
+| veRL | **0.3.0.post1** | 0.7+ has breaking changes (DTensorSpec requires torch 2.6+) |
+| vLLM | **0.6.3** | veRL 0.3 depends on this version's API |
+| torch | >=2.1, <2.6 | veRL 0.3 is incompatible with torch 2.6 |
+| transformers | >=4.40 | Qwen2.5 support |
 
 ---
 
-## 4. 数据说明
+## 4. Data
 
-所有数据在 `data/attribution/`，已包含在 repo 中：
+All data is in `data/attribution/`, included in the repo.
 
-### 训练数据
+### Training data
 
-| 文件 | 样本数 | Stage | 说明 |
-|------|--------|-------|------|
-| `sft_train_full.jsonl` | 59,500 | 1 | Binary NLI 数据。每行 `{"messages": [system, user, assistant]}`，assistant 只输出 label |
-| `seva_sft_train.jsonl` | 4,992 | 2 | 结构化 SFT 数据。assistant 输出完整 JSON（含 evidence_alignment, reasoning_chain 等） |
-| `seva_grpo_train.parquet` | 63,992 | 3 | GRPO 训练 prompts + ground truth |
-| `seva_grpo_val.parquet` | 500 | 3 | GRPO 验证集 |
+| File | Samples | Stage | Description |
+|------|---------|-------|-------------|
+| `sft_train_full.jsonl` | 59,500 | 1 | Binary NLI data. Each line: `{"messages": [system, user, assistant]}`, assistant outputs only the label |
+| `seva_sft_train.jsonl` | 4,992 | 2 | Structured SFT data. Same format but assistant outputs full JSON (evidence_alignment, reasoning_chain, etc.) |
+| `seva_grpo_train.parquet` | 63,992 | 3 | GRPO training prompts + ground truth for reward computation |
+| `seva_grpo_val.parquet` | 500 | 3 | GRPO validation set |
 
-### 评估数据
+### Evaluation data
 
-| 文件 | 样本数 | 说明 |
-|------|--------|------|
-| `clearfacts.jsonl` | 1,590 | 主要 benchmark: claim-source attribution |
-| `fever.jsonl` | 200 | 事实验证（3-class remapped to binary） |
-| `truthfulqa.jsonl` | 400 | 真实性检测 |
+| File | Samples | Description |
+|------|---------|-------------|
+| `clearfacts.jsonl` | 1,590 | Primary benchmark: claim-source attribution |
+| `fever.jsonl` | 200 | Fact verification (3-class remapped to binary) |
+| `truthfulqa.jsonl` | 400 | Truthfulness detection |
 
-### 数据格式
+### Data format
 
-**SFT 数据**（`messages` 格式，Stage 1 和 2 通用）：
+**SFT data** (`messages` format, shared by Stage 1 & 2):
 ```json
 {
   "messages": [
@@ -126,185 +124,188 @@ cd Verifiable_agent
   ]
 }
 ```
-- Stage 1 的 assistant 只有 binary label
-- Stage 2 的 assistant 有完整的 evidence_alignment + reasoning_chain + error_type
+- Stage 1 assistant: binary label only
+- Stage 2 assistant: full structured JSON with evidence_alignment + reasoning_chain + error_type
 
-**GRPO 数据**（parquet 列）：
-- `prompt`: JSON-encoded messages（system + user，不含 assistant）
-- `reward_model`: JSON，含 `ground_truth`（`target` label, `claim`, `source`, `error_type`）
-- `extra_info`: metadata（difficulty 分数，用于 curriculum learning）
+**GRPO data** (parquet columns):
+- `prompt`: JSON-encoded messages (system + user, no assistant)
+- `reward_model`: JSON with `ground_truth` containing `target` label, `claim`, `source`, `error_type`
+- `extra_info`: metadata (difficulty scores for curriculum learning)
 
 ---
 
-## 5. 代码结构
+## 5. Code Structure
 
 ```
 Verifiable_agent/
 |-- scripts/
-|   |-- train_seva_sft.py              # [核心] SFT 训练脚本 (Stage 1 & 2)
-|   |-- train_seva_3stage_full.sh      # [核心] 一键跑完 3 个 Stage
-|   |-- eval_seva.py                   # [核心] 评估脚本
-|   |-- generate_seva_sft_data.py      # 数据生成（GPT-4o teacher）
-|   |-- generate_adversarial_probes.py # 对抗样本生成
-|   +-- run_self_evolution.py          # 自进化循环
+|   |-- train_seva_sft.py              # [CORE] SFT training script (Stage 1 & 2)
+|   |-- train_seva_3stage_full.sh      # [CORE] One-click script for all 3 stages
+|   |-- eval_seva.py                   # [CORE] Evaluation script
+|   |-- generate_seva_sft_data.py      # Data generation (GPT-4o teacher)
+|   |-- generate_adversarial_probes.py # Adversarial sample generation
+|   +-- run_self_evolution.py          # Self-evolution loop
 |
 |-- src/
 |   |-- verifier/
-|   |   +-- seva_format.py             # [核心] 结构化输出 schema + system prompt
+|   |   +-- seva_format.py             # [CORE] Structured output schema + system prompt
 |   |-- training/
-|   |   +-- curriculum.py              # Curriculum learning（可选）
+|   |   +-- curriculum.py              # Curriculum learning (optional)
 |   |-- benchmarks/                    # Benchmark loaders
 |   +-- llm/                           # LLM wrappers (OpenAI, vLLM)
 |
-|-- seva_reward_v3.py                  # [核心] 8-component GRPO reward function
+|-- seva_reward_v3.py                  # [CORE] 8-component GRPO reward function
 |
 |-- drzero/
 |   |-- config/
-|   |   +-- seva_grpo.yaml             # [核心] GRPO 训练 config (Hydra)
+|   |   +-- seva_grpo.yaml             # [CORE] GRPO training config (Hydra)
 |   +-- verl/custom_reward/
-|       |-- seva_reward.py             # v2 reward（eval 脚本依赖）
-|       +-- seva_reward_v3.py          # v3 reward（GRPO 训练用，同根目录的副本）
+|       |-- seva_reward.py             # v2 reward (used by eval script)
+|       +-- seva_reward_v3.py          # v3 reward (used by GRPO training)
 |
-|-- data/attribution/                  # 所有训练 + 评估数据
-+-- results/                           # 已有实验结果 (JSON)
+|-- data/attribution/                  # All training + eval data
++-- results/                           # Existing experiment results (JSON)
 ```
 
-### 关键文件说明
+### Key file descriptions
 
-#### `scripts/train_seva_sft.py` — SFT 训练（Stage 1 & 2 共用）
-- 自动检测多卡（`WORLD_SIZE > 1`）并配置 DeepSpeed ZeRO-3
-- 关键参数：`--base-model`, `--train-file`, `--epochs`, `--lr`, `--max-length`
-- `--optim-8bit`: 切换 Adafactor optimizer（单卡时用，峰值 ~31GB vs AdamW ~47GB）
-- `--resume-from`: 从 checkpoint 恢复训练
-- Loss masking: 只在 assistant 部分计算 loss（system + user tokens 被 mask 为 -100）
-- 训练完成后自动保存 model + tokenizer 到 `{output-dir}/final/`
+#### `scripts/train_seva_sft.py` — SFT training (Stage 1 & 2 share this script)
+- Auto-detects multi-GPU (`WORLD_SIZE > 1`) and configures DeepSpeed ZeRO-3
+- Key args: `--base-model`, `--train-file`, `--epochs`, `--lr`, `--max-length`
+- `--optim-8bit`: switches to Adafactor optimizer (single-GPU, peak ~31GB vs AdamW ~47GB)
+- `--resume-from`: resume from checkpoint
+- Loss masking: only computes loss on assistant tokens (system + user masked to -100)
+- Saves model + tokenizer to `{output-dir}/final/` on completion
 
-#### `seva_reward_v3.py` — 8-component 过程奖励
-- 入口函数：`compute_score(data_source, solution_str, ground_truth, extra_info)` -> float
-- 批量入口：`compute_score_batch(...)` -> list[float]（含 boundary bonus）
-- 返回奖励值范围 [0.0, ~1.65]
-- 8 个组件权重随 epoch 动态调整（详见第 6 节）
-- veRL 通过 `NaiveRewardManager` 调用此函数
+#### `seva_reward_v3.py` — 8-component process reward
+- Entry point: `compute_score(data_source, solution_str, ground_truth, extra_info)` -> float
+- Batch entry: `compute_score_batch(...)` -> list[float] (with boundary bonus)
+- Returns reward in range [0.0, ~1.65]
+- 8 components with dynamic weights that shift across epochs (see Section 6)
+- Called by veRL's `NaiveRewardManager` during GRPO training
 
-#### `scripts/eval_seva.py` — 评估
-- 加载模型，在 benchmarks 上逐样本生成 structured JSON + 打分
-- 输出：accuracy, macro_F1, ECE, alignment_quality, chain_quality, groundedness
-- 每个 benchmark 生成 `{name}_results.json`（含逐样本详情）+ `summary.json`
-- **重要**: 默认 DATA_DIR 是 Yi Nian 路径，运行前必须设置 `export DATA_DIR="$(pwd)/data/attribution"`
+#### `scripts/eval_seva.py` — Evaluation
+- Loads model, generates structured JSON responses on benchmarks, scores them
+- Outputs: accuracy, macro_F1, ECE, alignment_quality, chain_quality, groundedness
+- Generates `{benchmark}_results.json` (per-sample details) + `summary.json`
+- **Important**: default DATA_DIR is hardcoded to a dev server path. You **must** set `export DATA_DIR="$(pwd)/data/attribution"` before running
 
-#### `src/verifier/seva_format.py` — 结构化输出 schema
-- 定义 `SEVA_SYSTEM_PROMPT`: 指导模型输出 6 个字段的 JSON
-- 定义 `SEVA_USER_TEMPLATE`: `"Claim: {claim}\nSource: {source}"`
-- 定义 `ERROR_TYPES`: 6 种错误类型 taxonomy
-- `make_system_prompt_with_rules()`: 可注入 ReasoningBank rules
+#### `src/verifier/seva_format.py` — Structured output schema
+- Defines `SEVA_SYSTEM_PROMPT`: instructs model to output 6-field JSON
+- Defines `SEVA_USER_TEMPLATE`: `"Claim: {claim}\nSource: {source}"`
+- Defines `ERROR_TYPES`: 6-category error taxonomy
+- `make_system_prompt_with_rules()`: optional ReasoningBank rule injection
 
 #### `drzero/config/seva_grpo.yaml` — GRPO config
-- veRL 的 Hydra config，继承 `ppo_trainer` 默认配置
-- 默认 reward path 指向 v2（运行时通过环境变量覆盖为 v3）
-- rollout: temperature=1.2, top_p=0.95, n=8（每个 prompt 生成 8 个候选）
+- Hydra config for veRL, extends `ppo_trainer` defaults
+- Default reward path points to v2; overridden at runtime via `SEVA_REWARD_MODULE=seva_reward_v3`
+- Rollout settings: temperature=1.2, top_p=0.95, n=8 (8 rollouts per prompt)
 
 ---
 
-## 6. 训练逻辑详解
+## 6. Training Logic
 
 ### Stage 1: Binary NLI Pretraining
 
-**目标**：让模型学会 claim-source 二分类（Attributable / Not Attributable）
+**Goal**: Teach the model claim-source binary classification (Attributable / Not Attributable).
 
-**训练逻辑**：
-1. 加载 Qwen2.5-7B-Instruct 基座
-2. 在 59K binary NLI 样本上做标准 causal LM SFT
-3. 只训练 assistant 部分的 loss（system + user tokens 被 mask 为 -100）
-4. DeepSpeed ZeRO-3 把模型参数分片到 4 张卡
+**How it works**:
+1. Load Qwen2.5-7B-Instruct base model
+2. Standard causal LM SFT on 59K binary NLI samples
+3. Only compute loss on assistant tokens (system + user masked to -100)
+4. DeepSpeed ZeRO-3 shards model parameters across 4 GPUs
 
-**超参选择理由**：
-- LR=1e-5: 标准 SFT learning rate，7B 模型适中
-- 1 epoch: NLI 数据量大（59K），1 epoch 足够学会分类能力，多了容易过拟合
-- max_length=1024: 大部分 claim-source pair 在 512 token 内，1024 留余量
+**Hyperparameter rationale**:
+- LR=1e-5: standard SFT learning rate for 7B models
+- 1 epoch: large dataset (59K), 1 epoch is sufficient for classification; more risks overfitting
+- max_length=1024: most claim-source pairs fit within 512 tokens; 1024 provides margin
 - effective_batch=64: per_gpu=1 x grad_accum=16 x 4GPU
 
 ### Stage 2: Structured SFT
 
-**目标**：在 Stage 1 学会分类的基础上，教模型输出完整的结构化 JSON
+**Goal**: On top of Stage 1's classification ability, teach structured JSON output.
 
-**训练逻辑**：
-1. 加载 Stage 1 的 checkpoint 作为 base model
-2. 在 5K 结构化样本上做 SFT
-3. 结构化输出包含 6 个字段：evidence_alignment, reasoning_chain, label, confidence, error_type, fix_suggestion
+**How it works**:
+1. Load Stage 1 checkpoint as base model
+2. SFT on 5K structured samples
+3. Structured output has 6 fields: evidence_alignment, reasoning_chain, label, confidence, error_type, fix_suggestion
 
-**超参选择理由**：
-- LR=3e-6（比 Stage 1 低 3x）: 避免 catastrophic forgetting Stage 1 的分类能力
-- 3 epochs: 数据集小（5K），需要多轮学习结构化格式
-- 其他参数与 Stage 1 相同
+**Hyperparameter rationale**:
+- LR=3e-6 (3x lower than Stage 1): prevents catastrophic forgetting of Stage 1 classification
+- 3 epochs: small dataset (5K), needs multiple passes to learn the structured format
+- Other params same as Stage 1
 
 ### Stage 3: GRPO with Process Reward
 
-**目标**：用强化学习进一步提升结构化输出质量和分类准确率
+**Goal**: Use reinforcement learning to further improve structured output quality and classification accuracy.
 
-**训练逻辑**：
-1. 加载 Stage 2 checkpoint 作为 actor 和 reference model
-2. 每个 prompt 用 vLLM 生成 8 个 rollout（temperature=1.2，鼓励多样性）
-3. 用 8-component reward function 对每个 rollout 打分
-4. GRPO advantage estimation: 每组 8 个样本内相互比较，计算相对优势
-5. PPO loss 更新 actor 模型（reference model 固定不动）
+**How it works**:
+1. Load Stage 2 checkpoint as both actor and reference model
+2. For each prompt, generate 8 rollouts via vLLM (temperature=1.2 for diversity)
+3. Score each rollout with the 8-component reward function
+4. GRPO advantage estimation: compare within each group of 8 rollouts
+5. PPO loss updates the actor model (reference model stays frozen)
 
-**8-component reward function 详解**：
+**8-component reward function**:
 
-| 组件 | 权重 (epoch 1 -> 5) | 做什么 | 代码位置 |
-|------|---------------------|--------|---------|
-| R_format | 0.10 (固定) | 检查 JSON 合法性，必须含 label/confidence/evidence_alignment/reasoning_chain | `extract_json_from_response()` |
-| R_accuracy | 0.80 -> 0.50 | label 是否正确。前期重准确率，后期降低让 grounding 发力 | `normalize_label()` |
-| R_calibration | 0.10 -> 0.25 | confidence 与正确性对齐: 答对+高置信=正奖励，答错+高置信=负奖励 | 直接计算 |
-| R_alignment | 0.15 -> 0.30 | evidence spans 是否真的出现在 claim/source 中。用 SequenceMatcher fuzzy match (threshold=0.6) | `_r_alignment()` |
-| R_chain | 0.10 -> 0.25 | reasoning steps 质量: 有实质内容(>10 chars)、与 label 一致、2-4 步最优 | `_r_chain()` |
-| R_coherence | 0.10 -> 0.20 | 跨组件一致性: label<->error_type, label<->alignment status, label<->chain judgment | `_r_coherence()` |
-| R_diagnosis | 0.05 -> 0.15 | error_type 是否正确、fix_suggestion 是否具体（仅 Not Attributable 时生效） | `_r_diagnosis()` |
-| R_specificity | 0.05 -> 0.10 | 惩罚模板化/通用输出，鼓励引用具体 claim 内容 | `_r_specificity()` |
+| Component | Weight (epoch 1 -> 5) | What it does |
+|-----------|----------------------|--------------|
+| R_format | 0.10 (fixed) | Checks valid JSON with required fields: label, confidence, evidence_alignment, reasoning_chain |
+| R_accuracy | 0.80 -> 0.50 | Binary: correct label match. High weight early (learn accuracy first), decreases later to let grounding improve |
+| R_calibration | 0.10 -> 0.25 | Confidence alignment: correct + high confidence = positive reward; wrong + high confidence = negative reward |
+| R_alignment | 0.15 -> 0.30 | Checks if evidence spans actually appear in claim/source text. Uses SequenceMatcher fuzzy matching (threshold=0.6) |
+| R_chain | 0.10 -> 0.25 | Reasoning step quality: substantive content (>10 chars), consistent with label, optimal at 2-4 steps |
+| R_coherence | 0.10 -> 0.20 | Cross-component consistency: label vs error_type, label vs alignment status, label vs chain judgments |
+| R_diagnosis | 0.05 -> 0.15 | Error type correctness + fix_suggestion quality (only applies to "Not Attributable" predictions) |
+| R_specificity | 0.05 -> 0.10 | Penalizes generic/templated outputs, rewards referencing specific claim content |
 
-**关键设计决策**：
-- **动态权重**: 前期 accuracy 占 80% -> 后期 50%，让 grounding 组件逐步发力。原因是模型需要先学对分类，再提升推理质量
-- **Boundary bonus**: 对 group 内正确率接近 50% 的 batch 给更高权重（信息量最大的样本）
-- **所有 grounding 检查都用 fuzzy matching** (threshold=0.6): 容忍模型输出的 span 与原文有小差异
+**Key design decisions**:
+- **Dynamic weights**: accuracy weight 80% -> 50% across epochs, so grounding components gradually take over. The model needs to learn correct classification first, then improve reasoning quality
+- **Boundary bonus**: groups with ~50% correct rate get higher weight (most informative for learning)
+- **All grounding checks use fuzzy matching** (threshold=0.6): tolerates minor text variations in model-generated spans
 
-**框架**: veRL 0.3（基于 Ray + FSDP + vLLM）
-- vLLM 做 rollout generation（快速推理采样）
-- FSDP 做 actor 模型训练（参数分片到多卡）
-- optimizer_offload=True: optimizer state 放 CPU，省 GPU 显存给 vLLM
+**Framework**: veRL 0.3 (Ray + FSDP + vLLM)
+- vLLM handles rollout generation (fast sampling)
+- FSDP handles actor model training (parameter sharding)
+- optimizer_offload=True: optimizer states on CPU, saving GPU memory for vLLM
 
 ---
 
-## 7. 运行命令
+## 7. Commands
 
-### 方法一：一键脚本（推荐）
+### Option A: One-click script (recommended)
 
 ```bash
-# 设置环境变量
-export BASE_MODEL="Qwen/Qwen2.5-7B-Instruct"  # 或本地已下载路径
+# Setup: copy reward function into verl's custom_reward directory (needed for Stage 3)
+cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py
+
+# Set environment variables
+export BASE_MODEL="Qwen/Qwen2.5-7B-Instruct"  # or local path
 export DATA_DIR="$(pwd)/data/attribution"
 export CKPT_DIR="$(pwd)/checkpoints/seva_v3_full_7b"
 export CUDA_VISIBLE_DEVICES=0,1,2,3
 
-# 跑完 Stage 1 -> 2 -> 3 -> 评估
+# Run all 3 stages + final evaluation
 bash scripts/train_seva_3stage_full.sh
 ```
 
-**使用前需修改 `train_seva_3stage_full.sh`**:
-1. 第 22 行 `cd /scratch/bfsl/ayuan/Verifiable_agent` 改为你的 repo 路径
-2. 第 23-25 行的默认路径改为你的环境（或用上面的环境变量覆盖）
-3. 如果不是 SLURM 环境，忽略开头的 `#SBATCH` header
+**Before running, modify `train_seva_3stage_full.sh`**:
+1. Line 22: change `cd /scratch/bfsl/ayuan/Verifiable_agent` to your repo path
+2. Lines 23-25: change default paths to your environment (or override with env vars above)
+3. The `#SBATCH` headers at the top are for SLURM clusters; ignore if running directly
 
-脚本会自动：
-- 检测已完成的 Stage（检查 `final/` 目录是否存在），跳过不重跑
-- Stage 1/2 用 `torchrun` + DeepSpeed ZeRO-3（自动配置）
-- Stage 3 用 veRL GRPO
-- 最后跑 eval 并保存结果
+The script automatically:
+- Detects completed stages (checks for `final/` directory), skips if already done
+- Configures DeepSpeed ZeRO-3 for Stage 1/2
+- Runs veRL GRPO for Stage 3
+- Runs final evaluation and saves results
 
-### 方法二：分步手动运行
+### Option B: Run stages manually
 
 #### Stage 1: Binary NLI
 
 ```bash
-# 4xA100, DeepSpeed ZeRO-3 (自动配置)
+# 4xA100, DeepSpeed ZeRO-3 (auto-configured)
 torchrun --nproc_per_node=4 --master_port=29500 \
     scripts/train_seva_sft.py \
     --base-model Qwen/Qwen2.5-7B-Instruct \
@@ -318,7 +319,7 @@ torchrun --nproc_per_node=4 --master_port=29500 \
 ```
 
 ```bash
-# 评估 Stage 1
+# Evaluate Stage 1
 export DATA_DIR="$(pwd)/data/attribution"
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_7b/stage1_nli/final \
@@ -326,7 +327,7 @@ python3 -u scripts/eval_seva.py \
     --output-dir results/seva_v3_full_7b_s1
 ```
 
-**期望结果**（LoRA baseline 参考，全量微调应更高）：
+**Expected results** (LoRA baseline reference; full FT should be higher):
 - ClearFacts F1 >= 0.67 (LoRA=0.669)
 - FEVER F1 >= 0.94 (LoRA=0.943)
 
@@ -346,14 +347,14 @@ torchrun --nproc_per_node=4 --master_port=29500 \
 ```
 
 ```bash
-# 评估 Stage 2
+# Evaluate Stage 2
 python3 -u scripts/eval_seva.py \
     --model checkpoints/seva_v3_7b/stage2_structured/final \
     --benchmarks clearfacts fever truthfulqa \
     --output-dir results/seva_v3_full_7b_s2
 ```
 
-**期望结果**（全量微调应比 LoRA 好）：
+**Expected results** (full FT should beat LoRA):
 - ClearFacts F1 >= 0.69 (LoRA=0.674)
 - FEVER F1 >= 0.92
 - TruthfulQA F1 >= 0.70
@@ -361,7 +362,10 @@ python3 -u scripts/eval_seva.py \
 #### Stage 3: GRPO
 
 ```bash
-# 设置环境
+# Setup: copy reward function into verl's custom_reward directory
+cp seva_reward_v3.py drzero/verl/custom_reward/seva_reward_v3.py
+
+# Set environment
 export SEVA_REWARD_MODULE="seva_reward_v3"
 export DATA_DIR="$(pwd)/data/attribution"
 
@@ -404,7 +408,7 @@ python -m verl.trainer.main_ppo \
 ```
 
 ```bash
-# GRPO 完成后，找到最新 checkpoint 并评估
+# After GRPO finishes, find the latest checkpoint and evaluate
 FINAL_MODEL=$(ls -d checkpoints/seva_v3_7b/stage3_grpo/global_step_* 2>/dev/null | sort -V | tail -1)
 
 python3 -u scripts/eval_seva.py \
@@ -413,19 +417,19 @@ python3 -u scripts/eval_seva.py \
     --output-dir results/seva_v3_full_7b_final
 ```
 
-**期望结果**（基于 3B 的 GRPO 提升幅度）：
+**Expected results** (based on 3B GRPO gains):
 - ClearFacts F1 >= 0.75 (3B: 0.649 -> 0.690, +4pts)
 - TruthfulQA F1 >= 0.80 (3B: 0.721 -> 0.827, +10pts)
-- 目标 ClearFacts F1 >= **0.81**
+- Target: ClearFacts F1 >= **0.81**
 
 ---
 
-## 8. eval_seva.py 使用说明
+## 8. Evaluation Details
 
-### 基本用法
+### Usage
 
 ```bash
-# 必须设置数据目录（否则会用 Yi Nian 服务器的硬编码路径）
+# MUST set data directory (otherwise uses hardcoded dev server path)
 export DATA_DIR="$(pwd)/data/attribution"
 
 python3 -u scripts/eval_seva.py \
@@ -434,80 +438,80 @@ python3 -u scripts/eval_seva.py \
     --output-dir results/my_eval
 ```
 
-### 输出文件
+### Output files
 
 ```
 results/my_eval/
-|-- clearfacts_results.json    # 逐样本详情 + 汇总指标
+|-- clearfacts_results.json    # Per-sample details + aggregate metrics
 |-- fever_results.json
 |-- truthfulqa_results.json
-+-- summary.json               # 所有 benchmark 的汇总
++-- summary.json               # Summary across all benchmarks
 ```
 
-### 指标说明
+### Metrics
 
-| 指标 | 含义 | 重要性 |
-|------|------|--------|
-| `macro_f1` | 宏平均 F1（**主要报告指标**） | 最重要 |
-| `accuracy` | 分类准确率 | 重要 |
-| `ece` | Expected Calibration Error（越低越好） | 次要 |
-| `avg_alignment_quality` | evidence span 定位质量 | 重要 |
-| `avg_chain_quality` | reasoning chain 质量 | 重要 |
-| `avg_groundedness` | span 是否来自原文 | 重要 |
-| `format_error_rate` | JSON 格式错误率（越低越好） | 次要 |
+| Metric | Meaning | Priority |
+|--------|---------|----------|
+| `macro_f1` | Macro-averaged F1 (**primary metric for the paper**) | Highest |
+| `accuracy` | Classification accuracy | High |
+| `ece` | Expected Calibration Error (lower is better) | Medium |
+| `avg_alignment_quality` | Evidence span localization quality | High |
+| `avg_chain_quality` | Reasoning chain quality | High |
+| `avg_groundedness` | Whether spans come from source text | High |
+| `format_error_rate` | JSON format error rate (lower is better) | Medium |
 
 ---
 
 ## 9. Troubleshooting
 
-### 常见问题
+### Common issues
 
-| 问题 | 解决方案 |
-|------|---------|
-| **Qwen2.5 rope_scaling "default" type** | vLLM 0.6.3 不认识。找到 `vllm/model_executor/layers/rotary_embedding.py`，把 `"default"` 当作标准 RoPE 处理 |
-| **AutoModelForVision2Seq import error** | transformers 5.x 删了这个 class。在 `verl/workers/fsdp_workers.py` 加 try/except |
-| **OOM on single GPU** | 用 `--optim-8bit`（Adafactor，峰值 ~31GB）+ `--max-length 512` |
-| **DeepSpeed CPU Adam 编译失败** | 缺 `python3-dev` 头文件。`train_seva_sft.py` 已自动把 `offload_optimizer.device` 设为 `"none"` |
-| **veRL import errors (torch 2.6+)** | 不要用 veRL 0.7+，固定 `verl==0.3.0.post1` + `torch<2.6` |
+| Problem | Solution |
+|---------|----------|
+| **Qwen2.5 rope_scaling "default" type** | vLLM 0.6.3 doesn't recognize it. Patch `vllm/model_executor/layers/rotary_embedding.py` to treat `"default"` as standard RoPE |
+| **AutoModelForVision2Seq import error** | transformers 5.x removed this class. Add try/except in `verl/workers/fsdp_workers.py` |
+| **OOM on single GPU** | Use `--optim-8bit` (Adafactor, ~31GB peak) + `--max-length 512` |
+| **DeepSpeed CPU Adam compile failure** | Missing `python3-dev` headers. The script already sets `offload_optimizer.device="none"` automatically |
+| **veRL import errors (torch 2.6+)** | Do not use veRL 0.7+. Pin `verl==0.3.0.post1` + `torch<2.6` |
 | **vLLM port 8000 already in use** | `kill -9 $(lsof -t -i :8000)` |
-| **eval_seva.py "file not found"** | 设置 `export DATA_DIR="$(pwd)/data/attribution"` |
-| **GRPO NaN rewards** | 检查模型是否在输出非 JSON，可能是 Stage 2 没训好 |
+| **eval_seva.py "file not found"** | Set `export DATA_DIR="$(pwd)/data/attribution"` |
+| **GRPO NaN rewards** | Model is outputting non-JSON. Stage 2 may not have trained properly |
 
-### eval_seva.py 路径问题
+### Hardcoded paths to fix
 
-脚本第 44-45 行的 DATA_DIR/RESULTS_DIR 默认值是 Yi Nian 服务器路径。在其他机器上**必须**通过环境变量覆盖：
+`scripts/eval_seva.py` lines 44-45 have hardcoded dev server paths for DATA_DIR and RESULTS_DIR. **Always** override via environment variables:
 
 ```bash
 export DATA_DIR="$(pwd)/data/attribution"
 export RESULTS_DIR="$(pwd)/results"
 ```
 
-### GRPO config 路径
+### GRPO config reward path
 
-`drzero/config/seva_grpo.yaml` 第 16 行的 `custom_reward_function.path` 指向 `verl/custom_reward/seva_reward.py`（v2）。Stage 3 命令通过 `SEVA_REWARD_MODULE=seva_reward_v3` 环境变量覆盖为 v3。如果环境变量不生效，手动修改 yaml:
+`drzero/config/seva_grpo.yaml` line 16 points to `verl/custom_reward/seva_reward.py` (v2). The Stage 3 command overrides this to v3 via the `SEVA_REWARD_MODULE=seva_reward_v3` environment variable. If the env var doesn't take effect, manually edit the yaml:
 
 ```yaml
 custom_reward_function:
-  path: verl/custom_reward/seva_reward_v3.py  # 改这行
+  path: verl/custom_reward/seva_reward_v3.py  # change this line
   name: compute_score
 ```
 
 ---
 
-## 10. 结果提交
+## 10. Results to Send Back
 
-跑完后请把以下文件发给我（ayuan@usc.edu）：
+After completing all stages, please send the following:
 
 1. **Stage 1 eval**: `results/seva_v3_full_7b_s1/summary.json`
 2. **Stage 2 eval**: `results/seva_v3_full_7b_s2/summary.json`
 3. **Stage 3 eval**: `results/seva_v3_full_7b_final/summary.json`
-4. **训练 log**: 每个 Stage 的 stdout/stderr（训练 loss 曲线）
-5. **如果 ClearFacts F1 > 0.75**: 保存 Stage 3 最终 checkpoint（用于论文）
+4. **Training logs**: stdout/stderr from each stage (loss curves)
+5. **If ClearFacts F1 > 0.75**: save Stage 3 final checkpoint (needed for the paper)
 
-### 关键判断标准
+### Success criteria
 
-| 指标 | 基线 (LoRA) | 预期 (Full FT) | 目标 |
-|------|------------|----------------|------|
+| Metric | Baseline (LoRA) | Expected (Full FT) | Target |
+|--------|----------------|---------------------|--------|
 | ClearFacts F1 | 0.674 | 0.75+ | **0.81+** |
 | FEVER F1 | 0.921 | 0.94+ | 0.95+ |
 | TruthfulQA F1 | 0.688 | 0.80+ | 0.83+ |
@@ -516,4 +520,4 @@ custom_reward_function:
 
 ## Contact
 
-Justin Yuan (USC) -- ayuan@usc.edu
+Justin Yuan (USC) — ayuan@usc.edu
