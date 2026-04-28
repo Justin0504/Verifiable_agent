@@ -242,10 +242,12 @@ def phase_probe(round_dir: Path, weakness_profile_path: str,
         "--annotate",
     ]
 
-    # Check for hard samples from analysis
-    hard_samples = round_dir / "analysis" / list(
-        (round_dir / "analysis").glob("*/hard_samples.json")
-    )[0] if (round_dir / "analysis").exists() else None
+    # Check for hard samples from analysis (for hard negative mining)
+    hard_samples = None
+    if (round_dir / "analysis").exists():
+        hard_files = list((round_dir / "analysis").glob("*/hard_samples.json"))
+        if hard_files:
+            hard_samples = hard_files[0]
 
     if hard_samples and hard_samples.exists():
         cmd.extend(["--hard-samples", str(hard_samples)])
@@ -335,12 +337,13 @@ def write_grpo_script(path: Path, model: str, data: str,
     epochs = max(1, steps // 50)
 
     script = f"""#!/bin/bash
-# SEVA Self-Evolution GRPO — Auto-generated
+# SEVA v3 Self-Evolution GRPO — Auto-generated
 source /usr/local/anaconda3/etc/profile.d/conda.sh
 conda activate verl
 
 set -x
 export CUDA_VISIBLE_DEVICES=0,1
+export SEVA_REWARD_MODULE=seva_reward_v3  # Use v3 grounded reward
 
 MODEL="{model}"
 TRAIN_DATA="{data}"

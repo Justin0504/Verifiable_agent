@@ -53,6 +53,10 @@ def main():
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     parser.add_argument("--merge-lora", action="store_true",
                         help="Merge LoRA weights into base model after training")
+    parser.add_argument("--resume-from", type=str, default=None,
+                        help="Resume training from checkpoint directory")
+    parser.add_argument("--optim-8bit", action="store_true",
+                        help="Use Adafactor optimizer to reduce memory (for single GPU)")
     args = parser.parse_args()
 
     print(f"Base model: {args.base_model}")
@@ -126,6 +130,41 @@ def main():
     )
 
     # Training
+    # Detect distributed training for DeepSpeed ZeRO-3
+    is_distributed = int(os.environ.get("WORLD_SIZE", 1)) > 1
+    ds_args = {}
+    if is_distributed and not args.lora:
+        ws = os.environ.get("WORLD_SIZE", "1")
+        print(f"Distributed training: WORLD_SIZE={ws}, using DeepSpeed ZeRO-3")
+        ds_config = {
+            "bf16": {"enabled": True},
+            "zero_optimization": {
+                "stage": 3,
+                "offload_optimizer": {"device": "none"},
+                "offload_param": {"device": "none"},
+                "overlap_comm": True,
+                "contiguous_gradients": True,
+                "sub_group_size": 1e9,
+                "reduce_bucket_size": "auto",
+                "stage3_prefetch_bucket_size": "auto",
+                "stage3_param_persistence_threshold": "auto",
+                "stage3_max_live_parameters": 1e9,
+                "stage3_max_reuse_distance": 1e9,
+                "stage3_gather_16bit_weights_on_model_save": True,
+            },
+            "gradient_accumulation_steps": "auto",
+            "gradient_clipping": "auto",
+            "steps_per_print": 100,
+            "train_batch_size": "auto",
+            "train_micro_batch_size_per_gpu": "auto",
+            "wall_clock_breakdown": False,
+        }
+        ds_config_path = os.path.join(args.output_dir, "ds_config.json")
+        os.makedirs(args.output_dir, exist_ok=True)
+        with open(ds_config_path, "w") as f:
+            json.dump(ds_config, f, indent=2)
+        ds_args["deepspeed"] = ds_config_path
+
     training_args = TrainingArguments(
         output_dir=args.output_dir,
         num_train_epochs=args.epochs,
@@ -135,14 +174,17 @@ def main():
         lr_scheduler_type="cosine",
         warmup_ratio=0.05,
         weight_decay=0.01,
+        optim="adafactor" if args.optim_8bit else "adamw_torch",
         bf16=True,
         logging_steps=10,
-        save_strategy="epoch",
+        save_strategy="steps",
+        save_steps=200,
         save_total_limit=2,
         report_to="none",
-        dataloader_num_workers=4,
+        dataloader_num_workers=2,
         gradient_checkpointing=True,
         remove_unused_columns=False,
+        **ds_args,
     )
 
     trainer = Trainer(
@@ -152,7 +194,7 @@ def main():
         processing_class=tokenizer,
     )
 
-    trainer.train()
+    trainer.train(resume_from_checkpoint=args.resume_from)
 
     # Save final
     final_dir = os.path.join(args.output_dir, "final")

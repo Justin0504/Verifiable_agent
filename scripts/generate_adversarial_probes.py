@@ -314,6 +314,95 @@ def main():
     print(f"\n  Generated: {len(probes)} ({failed} failed, "
           f"{time.time()-t0:.0f}s)")
 
+    # --- Contrastive pairs: minimal edits on Attributable probes ---
+    positives = [p for p in probes if p.get("label") == "Attributable"]
+    if positives:
+        print(f"\nGenerating contrastive pairs for {len(positives)} positives...")
+        contrastive = []
+        contrastive_failed = 0
+
+        CONTRASTIVE_SYSTEM = (
+            "You are a precise adversarial editor. Given an attributable (claim, source) pair, "
+            "create minimal modifications to the claim that make it NOT attributable. "
+            "Change as little as possible — ideally one word, number, or phrase."
+        )
+        CONTRASTIVE_TMPL = (
+            "Original claim (fully supported by source):\n{claim}\n\n"
+            "Source:\n{source}\n\n"
+            "Generate 2 minimally modified claims that are NOT attributable. "
+            "Each should change exactly ONE detail. Use different modification types:\n"
+            "- numerical_exaggeration: change a number/quantity\n"
+            "- negation_flip: add/remove a negation\n"
+            "- scope_inflation: 'some' → 'all', specific → general\n"
+            "- temporal_shift: remove/alter temporal qualifier\n"
+            "- entity_substitution: swap a name/entity\n\n"
+            'Output: JSON array of {{"claim": "...", "error_type": "...", "what_changed": "..."}}'
+        )
+
+        with ThreadPoolExecutor(max_workers=args.workers) as pool:
+            def gen_contrastive(probe):
+                prompt = CONTRASTIVE_TMPL.format(
+                    claim=probe["claim"], source=probe["source"][:1500]
+                )
+                try:
+                    resp = llm.generate(prompt, system=CONTRASTIVE_SYSTEM)
+                    text = resp.text.strip()
+                    s, e = text.find("["), text.rfind("]") + 1
+                    if s == -1 or e == 0:
+                        return []
+                    items = json.loads(text[s:e])
+                    results = []
+                    for item in items:
+                        if "claim" not in item:
+                            continue
+                        results.append({
+                            "claim": item["claim"],
+                            "source": probe["source"],
+                            "label": "Not Attributable",
+                            "error_type": item.get("error_type", ""),
+                            "difficulty": "hard",
+                            "_meta": {
+                                "target_type": "contrastive",
+                                "source": "contrastive_pair",
+                                "original_claim": probe["claim"],
+                                "what_changed": item.get("what_changed", ""),
+                            },
+                        })
+                    return results
+                except Exception:
+                    return []
+
+            futures = {pool.submit(gen_contrastive, p): p for p in positives}
+            for future in as_completed(futures):
+                result = future.result()
+                if result:
+                    contrastive.extend(result)
+                else:
+                    contrastive_failed += 1
+
+        print(f"  Contrastive pairs: {len(contrastive)} generated")
+        probes.extend(contrastive)
+
+    # --- Hard negative mining from previous eval results ---
+    if args.hard_samples and Path(args.hard_samples).exists():
+        print(f"\nLoading hard negatives from {args.hard_samples}...")
+        with open(args.hard_samples) as f:
+            hard = json.load(f)
+        # Filter: high confidence + wrong prediction
+        hard_negatives = [s for s in hard
+                         if s.get("confidence", 0) > 0.7 and not s.get("correct", True)]
+        # Add as replay samples
+        for s in hard_negatives[:int(args.num_samples * args.replay_ratio)]:
+            probes.append({
+                "claim": s.get("claim", ""),
+                "source": s.get("source", ""),
+                "label": s.get("gold", s.get("gold_label", "")),
+                "error_type": s.get("error_type", ""),
+                "difficulty": "hard",
+                "_meta": {"source": "hard_negative_replay"},
+            })
+        print(f"  Added {min(len(hard_negatives), int(args.num_samples * args.replay_ratio))} hard negatives")
+
     # Save probes
     probes_path = output_dir / "adversarial_probes.jsonl"
     with open(probes_path, "w") as f:
@@ -388,7 +477,11 @@ def main():
                     "ability": "fact_attribution",
                     "reward_model": json.dumps({
                         "style": "rule",
-                        "ground_truth": {"target": s["gold_label"]},
+                        "ground_truth": {
+                            "target": s["gold_label"],
+                            "claim": s["messages"][1]["content"].split("Source:")[0].replace("Claim:", "").strip() if "Source:" in s["messages"][1]["content"] else "",
+                            "source": s["messages"][1]["content"].split("Source:")[1].split("Verify")[0].strip() if "Source:" in s["messages"][1]["content"] else "",
+                        },
                     }),
                     "extra_info": json.dumps({
                         "source": "adversarial",
