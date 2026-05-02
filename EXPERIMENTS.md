@@ -151,15 +151,20 @@ All data is in `data/attribution/`, included in the repo.
 Verifiable_agent/
 |-- scripts/
 |   |-- train_seva_sft.py              # [CORE] SFT training script (Stage 1 & 2)
-|   |-- train_seva_3stage_full.sh      # [CORE] One-click script for all 3 stages
+|   |-- train_seva_3stage_full.sh      # [CORE] One-click script for Stages 1-3
 |   |-- eval_seva.py                   # [CORE] Evaluation script
+|   |-- run_self_evolution.py          # [CORE] Self-evolution orchestrator (Stage 4)
+|   |-- analyze_failures.py            # Reflect: weakness profile from eval results
+|   |-- generate_adversarial_probes.py # Probe: targeted adversarial data generation
 |   |-- generate_seva_sft_data.py      # Data generation (GPT-4o teacher)
-|   |-- generate_adversarial_probes.py # Adversarial sample generation
-|   +-- run_self_evolution.py          # Self-evolution loop
 |
 |-- src/
 |   |-- verifier/
 |   |   +-- seva_format.py             # [CORE] Structured output schema + system prompt
+|   |-- adversarial/
+|   |   |-- generator.py               # Adversarial example generator
+|   |   |-- strategies.py              # 6 perturbation strategies
+|   |   +-- quality_filter.py          # Quality filtering for generated probes
 |   |-- training/
 |   |   +-- curriculum.py              # Curriculum learning (optional)
 |   |-- benchmarks/                    # Benchmark loaders
@@ -437,6 +442,65 @@ python3 -u scripts/eval_seva.py \
 - TruthfulQA F1 >= 0.80 (3B: 0.721 -> 0.827, +10pts)
 - Target: ClearFacts F1 >= **0.81**
 
+#### Stage 4: Self-Evolution Iteration (after Stage 3)
+
+After GRPO (Stage 3) produces a checkpoint, we run iterative self-evolution rounds to push performance further. Each round:
+
+1. **Verify** — evaluate current model, get per-sample structured results
+2. **Reflect** — analyze failures, build weakness profile (which error types are worst)
+3. **Probe** — generate targeted adversarial data based on weaknesses (not uniform — weak areas get more samples)
+4. **Refine** — merge adversarial data with original data, retrain with GRPO
+
+The script `run_self_evolution.py` orchestrates this. It has a validation gate: if any benchmark regresses > 5% F1, it warns you.
+
+```bash
+# Find the best GRPO checkpoint from Stage 3
+GRPO_CKPT=$(ls -d checkpoints/seva_v3_full_7b/stage3_grpo/global_step_* 2>/dev/null | sort -V | tail -1)
+
+# Run 2 rounds of self-evolution
+# Round 0: Verify + Reflect + Probe + Refine (generates adversarial data, retrains)
+# Round 1: Verify new model + Reflect + Probe + Refine (iterate)
+python scripts/run_self_evolution.py \
+    --base-model "$GRPO_CKPT" \
+    --data-dir "$(pwd)/data/attribution" \
+    --output-dir checkpoints/seva_v3_full_7b/evolution \
+    --rounds 2 \
+    --benchmarks clearfacts fever truthfulqa halueval \
+    --probes-per-round 2000 \
+    --grpo-steps 200 \
+    --teacher-model gpt-4o-mini
+```
+
+**Important notes:**
+- The script prepares GRPO training scripts but does NOT auto-run GPU training. After each round's Probe phase, it prints:
+  ```
+  >>> MANUAL STEP REQUIRED <<<
+  Run on GPU server:
+    bash checkpoints/seva_v3_full_7b/evolution/round0/train_grpo.sh
+  Then resume with --start-round 1 --base-model <new_checkpoint>
+  ```
+- So the actual workflow is:
+  1. Run `run_self_evolution.py --rounds 1` → it does Verify + Reflect + Probe, generates training script
+  2. Run the generated `train_grpo.sh` on GPUs (same setup as Stage 3)
+  3. Run `run_self_evolution.py --start-round 1 --rounds 1 --base-model <new_ckpt>` → next round
+
+**Stopping criteria:**
+- If Round N improves ClearFacts F1 by < 0.5 over Round N-1, stop (diminishing returns)
+- If validation gate fails (any benchmark regresses > 5%), investigate before continuing
+- Based on related work (Dr. Zero, R-Zero), expect 2-3 rounds before convergence
+
+**Evaluate after each round:**
+```bash
+# After round 0 training completes
+ROUND0_CKPT="checkpoints/seva_v3_full_7b/evolution/round0/checkpoints/final"
+python3 -u scripts/eval_seva.py \
+    --model "$ROUND0_CKPT" \
+    --benchmarks clearfacts fever truthfulqa halueval \
+    --output-dir results/seva_v3_full_7b_evo_round0
+```
+
+**Send**: `results/seva_v3_full_7b_evo_round0/summary.json` (and round1 if you run it)
+
 ---
 
 ## 8. Evaluation Details
@@ -609,6 +673,8 @@ Please record wall-clock time for each stage:
 | Stage 1 (59K, 1 epoch) | 4xA100 80G | ? | ? |
 | Stage 2 (5K, 3 epochs) | 4xA100 80G | ? | ? |
 | Stage 3 (GRPO, 5 epochs) | 4xA100 80G | ? | ? |
+| Stage 4 (Self-evo round 0) | 4xA100 80G | ? | ? |
+| Stage 4 (Self-evo round 1) | 4xA100 80G | ? | ? |
 | Ablation (single-stage) | 4xA100 80G | ? | ? |
 | Eval (per benchmark) | 1xA100 80G | ? | ? |
 
@@ -628,18 +694,21 @@ The current paper (paper/arr2026/acl_latex.tex) reports 3B GRPO + 7B LoRA result
 | Table 9 (GRPO hyperparams) | Update: G=16, temp=0.8, kl=0.02 (currently shows 3B: G=8, temp=1.2, kl=0.001) |
 | Discussion | Update "7B full FT is future work" → actual results |
 | Limitations | Remove "7B uses LoRA" limitation |
+| Self-evolution (§4) | Add multi-round results if available (round 0 vs round 1 F1 comparison) |
 
 ### Summary checklist
 
 | # | Item | Priority |
 |---|------|----------|
-| 1 | Stage 1 eval (clearfacts, fever, truthfulqa) | High |
-| 2 | Stage 2 eval (clearfacts, fever, truthfulqa) | High |
-| 3 | Stage 3 eval (clearfacts, fever, truthfulqa) | **Critical** |
+| 1 | Stage 1 eval (clearfacts, fever, truthfulqa, halueval) | High |
+| 2 | Stage 2 eval (clearfacts, fever, truthfulqa, halueval) | High |
+| 3 | Stage 3 eval (clearfacts, fever, truthfulqa, halueval) | **Critical** |
 | 4 | Full training log (stdout with GRPO dynamics) | High |
-| 5 | Single-stage ablation eval | Medium |
-| 6 | Wall-clock times per stage | Medium |
-| 7 | Final checkpoint (if ClearFacts F1 > 0.75) | High |
+| 5 | Stage 4: Self-evolution round 0 eval | **Critical** |
+| 6 | Stage 4: Self-evolution round 1 eval (if round 0 improved > 0.5 F1) | High |
+| 7 | Single-stage ablation eval | Medium |
+| 8 | Wall-clock times per stage | Medium |
+| 9 | Final checkpoint (if ClearFacts F1 > 0.75) | High |
 
 ### Success criteria
 
