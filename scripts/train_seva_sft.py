@@ -151,7 +151,7 @@ def main():
             "bf16": {"enabled": True},
             "zero_optimization": {
                 "stage": 3,
-                "offload_optimizer": {"device": "none"},
+                "offload_optimizer": {"device": "cpu", "pin_memory": True},
                 "offload_param": {"device": "none"},
                 "overlap_comm": True,
                 "contiguous_gradients": True,
