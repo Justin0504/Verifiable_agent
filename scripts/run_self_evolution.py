@@ -423,7 +423,7 @@ def main():
     parser.add_argument("--base-model", type=str, required=True,
                         help="Starting model checkpoint path")
     parser.add_argument("--data-dir", type=str,
-                        default="/home/yinian/verifiable_agent/data/attribution",
+                        default=str(PROJECT_DIR / "data" / "attribution"),
                         help="Directory with original GRPO training data")
     parser.add_argument("--output-dir", type=str, required=True,
                         help="Output directory for all evolution artifacts")
