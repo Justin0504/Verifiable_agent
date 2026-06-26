@@ -237,10 +237,10 @@ export ANTHROPIC_API_KEY="your-key"   # Optional: Claude baselines
 ## Citation
 
 ```bibtex
-@article{seva2026,
-  title={SEVA: Structured Evidence Verification Agents with Process Reward Optimization},
-  author={Anonymous},
-  journal={ARR},
+@inproceedings{yuan2026seva,
+  title={{SEVA}: Self-Evolving Verification Agent with Process Reward for Fact Attribution},
+  author={Yuan, Aojie and Nian, Yi and Zhang, Haiyue and Su, Zijian and Zhao, Yue},
+  booktitle={ICML 2026 Workshop on Trustworthy AI for Good (AI4GOOD)},
   year={2026}
 }
 ```
