@@ -69,6 +69,7 @@
 \renewcommand{\ICML@appearing}{%
   \textit{Accepted at the ICML 2026 Workshop on Trustworthy AI for Good (AI4GOOD), Seoul, South Korea.}
   Copyright 2026 by the author(s).%
+  \quad Code: \url{https://github.com/Justin0504/Verifiable_agent}%
 }
 \makeatother
 
@@ -145,7 +146,7 @@ Our contributions are threefold.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=\textwidth]{fig1_figma.pdf}
+\includegraphics[width=\textwidth]{fig1_figma_hires.png}
 \caption{\textbf{\seva overview.} \textit{Top:} Given a claim-source pair, the verifier produces structured output --- evidence alignments, reasoning chains, calibrated confidence, and error diagnosis. \textit{Bottom:} Self-evolution loop. Structured errors reveal \emph{why} the model fails (not just \emph{that} it fails), enabling targeted adversarial data generation focused on the weakest error types.}
 \label{fig:overview}
 \end{figure*}
@@ -1579,7 +1580,7 @@ We present a structured reproducibility checklist following the ICML 2026 templa
 
 To ensure reproducibility:
 \begin{itemize}[nosep,leftmargin=*]
-\item \textbf{Code:} Full training and evaluation code --- including reward functions, GRPO configuration, and data-processing pipelines --- will be released at the project repository upon publication.
+\item \textbf{Code:} Full training and evaluation code --- including reward functions, GRPO configuration, and data-processing pipelines --- is publicly available at \url{https://github.com/Justin0504/Verifiable_agent}.
 \item \textbf{Data:} The structured \seva training data ($4{,}992$ samples), GRPO prompts ($4{,}500$ samples), adversarial probes from the self-evolution loop ($1{,}122$/$2{,}013$/$7{,}787$ for Rounds~2/3/4), and evaluation splits are released alongside the code.
 \item \textbf{Models:} We use publicly available base models (Qwen2.5-3B-Instruct and Qwen2.5-7B-Instruct).
 \item \textbf{Hyperparameters:} All hyperparameters are listed in Appendix~\ref{app:impl}.
