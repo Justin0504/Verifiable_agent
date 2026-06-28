@@ -19,3 +19,52 @@ logs/
 docs/~$*
 data/*.jsonl
 results/_archive/
+
+# --- LaTeX build artifacts ---
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+*.synctex.gz
+*.fls
+*.fdb_latexmk
+*.bak
+
+# --- Camera-ready unused figure variants ---
+# (Only the figures referenced in the .tex file are tracked.
+#  These are intermediate or superseded variants kept locally.)
+paper/ai4good_camera_ready/fig1_architecture.png
+paper/ai4good_camera_ready/fig1_overview.png
+paper/ai4good_camera_ready/fig1_overview_v2.pdf
+paper/ai4good_camera_ready/fig1_overview_v2.png
+paper/ai4good_camera_ready/fig2_reward.png
+paper/ai4good_camera_ready/fig2_reward_v2.pdf
+paper/ai4good_camera_ready/fig2_reward_v2.png
+paper/ai4good_camera_ready/fig2_tikz.tex
+paper/ai4good_camera_ready/fig3_pipeline.png
+paper/ai4good_camera_ready/fig_advantage_spread.png
+paper/ai4good_camera_ready/fig_confusion.png
+paper/ai4good_camera_ready/fig_error_dist.png
+paper/ai4good_camera_ready/fig_hmsr.pdf
+paper/ai4good_camera_ready/fig_hmsr.png
+paper/ai4good_camera_ready/fig_implicit_curriculum.png
+paper/ai4good_camera_ready/fig_landscape.png
+paper/ai4good_camera_ready/fig_msr_oracle.pdf
+paper/ai4good_camera_ready/fig_msr_oracle.png
+paper/ai4good_camera_ready/fig_msr_pipeline.pdf
+paper/ai4good_camera_ready/fig_msr_pipeline.png
+paper/ai4good_camera_ready/fig_pareto.pdf
+paper/ai4good_camera_ready/fig_pareto.png
+paper/ai4good_camera_ready/fig_perbench_gap.pdf
+paper/ai4good_camera_ready/fig_perbench_gap.png
+paper/ai4good_camera_ready/fig_reward_trajectory.png
+paper/ai4good_camera_ready/fig_scaling.pdf
+paper/ai4good_camera_ready/fig_scaling.png
+paper/ai4good_camera_ready/fig_specialization.pdf
+paper/ai4good_camera_ready/fig_specialization.png
+paper/ai4good_camera_ready/fig_specialization_ai4good.png
+paper/ai4good_camera_ready/fig_training_dynamics.pdf
+paper/ai4good_camera_ready/fig_training_dynamics.png
+paper/ai4good_camera_ready/fig_trajectory.png
+paper/ai4good_camera_ready/icml_numpapers.pdf

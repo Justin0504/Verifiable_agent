@@ -582,14 +582,9 @@ Four caveats bound the claims.
 \label{sec:discussion}
 % ==============================================================
 
-\paragraph{Scale and RL as complementary axes.}
-The 7B-SFT-LoRA-128 ($68.5$ F1) $\to$ 3B-GRPO ($69.0$ F1) comparison suggests scale and process-reward RL reach the same accuracy through different routes; their combination should close the gap to MiniCheck-7B's $81.2$, which we are actively testing.
-More broadly, the same five-component decomposition that makes \seva\ auditable also extracts five gradients from each response where binary reward extracts one --- a principle that should transfer to any agent emitting structured intermediates (tool calls, code with tests, clinical notes with diagnoses).
-
-\paragraph{Implications for trustworthy AI deployment.}
-The combination of auditable output and reliable structural quality addresses a practical need that binary verifiers cannot meet: in safety-critical pipelines, an unparseable response is functionally equivalent to a wrong one, so the $28\% \to <\!1\%$ drop in format errors after GRPO matters as much as the F1 gain.
-The implicit curriculum is itself deployment-relevant: step-$150$ checkpoints are already format-reliable but not yet F1-saturated, so applications prioritizing structural integrity over peak accuracy can stop training early and route the resulting structured diagnosis to a downstream correction module or human reviewer with full context --- the error taxonomy names the problem, the alignment shows where, and the fix proposes a resolution, all automatically at 3B scale.
-This pattern --- structured output as a contract between an upstream generator and a downstream auditor --- is what makes \seva\ a building block for trustworthy agent pipelines rather than a one-off classifier.
+Scale and process-reward RL are complementary, not redundant: $7\text{B}$-SFT-LoRA-128 ($68.5$ F1) and $3\text{B}$-GRPO ($69.0$ F1) reach the same accuracy through different routes, and their combination should close the gap to MiniCheck-$7\text{B}$'s $81.2$ --- a hypothesis we are actively testing.
+Beyond accuracy, the five-component decomposition is itself dual-use: it extracts five gradients per response where binary reward extracts one, and exposes the per-category dynamics under which the specialization fingerprint becomes visible at all.
+For deployment, an unparseable response is functionally indistinguishable from a wrong one, so the $28\%{\to}<\!1\%$ format-error drop is as load-bearing as the F1 gain; safety-critical pipelines can early-stop at step $150$ (already format-reliable, not yet F1-saturated) and route the structured diagnosis --- taxonomy, alignment, fix --- to an auditor as a \emph{contract} between upstream generator and downstream judge, the substrate any trustworthy agent pipeline ultimately needs.
 
 
 % ==============================================================
@@ -597,11 +592,7 @@ This pattern --- structured output as a contract between an upstream generator a
 \label{sec:conclusion}
 % ==============================================================
 
-\seva\ closes the gap between what a verifier reports and what an agent can act on: a 3B model matches GPT-4o-mini on ClearFacts ($69.0$ vs.\ $69.8$ F1) at $100\%$ format compliance, while producing alignments, reasoning chains, calibrated confidence, and a six-category error diagnosis with fixes.
-The technical enabler is a process reward whose five-component decomposition resolves the advantage collapse of binary reward on structured output (Prop.~\ref{prop:collapse}--\ref{prop:variance}); the empirical surprise is a monotone, signed specialization fingerprint that emerges under iterative refinement, robust at $4\times$ data, visible only because per-category dynamics are exposed by the structured output.
-
-Three principles extend beyond verification: \emph{reward granularity must match output granularity}; \emph{structured output is a dual-use asset} (auditability + richer training signal); and \emph{iterative self-improvement drifts toward specialization} under single-sourced probes, recommending architectural responses (per-domain routing) over more training rounds.
-These should transfer to any domain where agents must not only answer but explain, justify, and improve under audit --- code review with executable tests, clinical reasoning with chart-grounded diagnoses, legal analysis with citation-grounded arguments --- the settings where trustworthy AI is not optional.
+A 3B \seva\ matches GPT-4o-mini on ClearFacts ($69.0$ vs.\ $69.8$ F1) at $100\%$ format compliance while producing auditable structured output --- alignments, reasoning chains, calibrated confidence, six-category error diagnosis with fixes. The enabler is a process reward that resolves binary reward's advantage collapse on multi-component generation (Prop.~\ref{prop:collapse}--\ref{prop:variance}); the surprise is a monotone, signed specialization fingerprint under iterative refinement, visible only because per-category dynamics are exposed by structured output. Three principles should transfer wherever agents must explain, justify, and improve under audit --- \emph{reward granularity matches output granularity}, \emph{structured output is a dual-use asset}, \emph{iterative self-improvement drifts toward specialization under single-sourced probes} --- favoring architectural responses over more training rounds.
 
 
 % ==============================================================
