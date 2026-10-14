@@ -1,0 +1,39 @@
+cff-version: 1.2.0
+message: "If you use this code, please cite the paper below."
+title: "SEVA: Self-Evolving Verification Agent with Process Reward for Fact Attribution"
+authors:
+  - family-names: "Yuan"
+    given-names: "Aojie"
+    website: "https://aojieyuan.com"
+  - family-names: "Nian"
+    given-names: "Yi"
+  - family-names: "Zhang"
+    given-names: "Haiyue"
+  - family-names: "Su"
+    given-names: "Zijian"
+  - family-names: "Zhao"
+    given-names: "Yue"
+repository-code: "https://github.com/Justin0504/Verifiable_agent"
+url: "https://aojieyuan.com/papers/seva"
+identifiers:
+  - type: doi
+    value: "10.48550/arXiv.2606.29713"
+preferred-citation:
+  type: conference-paper
+  conference:
+    name: "AI4GOOD and FAGEN Workshops at ICML 2026"
+  title: "SEVA: Self-Evolving Verification Agent with Process Reward for Fact Attribution"
+  authors:
+    - family-names: "Yuan"
+      given-names: "Aojie"
+    - family-names: "Nian"
+      given-names: "Yi"
+    - family-names: "Zhang"
+      given-names: "Haiyue"
+    - family-names: "Su"
+      given-names: "Zijian"
+    - family-names: "Zhao"
+      given-names: "Yue"
+  year: 2026
+  url: "https://arxiv.org/abs/2606.29713"
+  doi: "10.48550/arXiv.2606.29713"
