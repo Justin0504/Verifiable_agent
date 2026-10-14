@@ -2,6 +2,8 @@
 
 **Paper**: *SEVA: Structured Evidence Verification Agents with Process Reward Optimization* (ARR 2026)
 
+> **arXiv version:** [SEVA: Self-Evolving Verification Agent with Process Reward for Fact Attribution](https://arxiv.org/abs/2606.29713) — AI4GOOD & FAGEN Workshops @ ICML 2026.
+
 SEVA is a fact attribution verification framework that produces **structured, interpretable output** --- evidence alignment, step-by-step reasoning chains, calibrated confidence, and fine-grained error diagnosis --- trained with **GRPO and a novel process reward function**.
 
 ## Key Contributions
@@ -248,3 +250,12 @@ export ANTHROPIC_API_KEY="your-key"   # Optional: Claude baselines
 ## License
 
 MIT
+
+<!-- aojieyuan-paper-section -->
+## Paper & citation
+
+This repository accompanies **[SEVA: Self-Evolving Verification Agent with Process Reward for Fact Attribution](https://arxiv.org/abs/2606.29713)** — AI4GOOD and FAGEN Workshops @ ICML 2026, by [Aojie (Justin) Yuan](https://aojieyuan.com), Yi Nian, Haiyue Zhang, Zijian Su, Yue Zhao.
+
+- Paper page (PDF, abstract, BibTeX): https://aojieyuan.com/papers/seva
+- arXiv: https://arxiv.org/abs/2606.29713
+- Plain-language explainer: https://aojieyuan.com/blog/what-is-a-self-evolving-verification-agent · [中文解读](https://aojieyuan.com/zh/blog/what-is-a-self-evolving-verification-agent)
